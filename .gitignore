@@ -1,0 +1,102 @@
+# Virtual environments
+venv/
+.venv/
+env/
+ENV/
+
+# Environment / secrets — never commit real secrets
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# Python
+__pycache__/
+*/__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+pip-wheel-metadata/
+MANIFEST
+
+# Django
+*.log
+local_settings.py
+db.sqlite3
+db.sqlite3-journal
+media/
+staticfiles/
+**/migrations/*.pyc
+
+# EDI generated / transport artifacts (when added)
+exports/
+inbox/
+outbox/
+*.x12
+*.edi
+
+# Local DB dumps
+*.sqlite3
+*.dump
+
+
+# Test / coverage / type / lint
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.hypothesis/
+nosetests.xml
+coverage.xml
+*.cover
+.cache/
+
+# IDE / editors
+.idea/
+.vscode/
+*.sublime-project
+*.sublime-workspace
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Misc
+*.tmp
+*.temp
+*.bak
+*.orig
+celerybeat-schedule
+celerybeat.pid
+
+# Docker
+*.pid
+

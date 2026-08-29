@@ -1,0 +1,24 @@
+# ========
+# Docker ignore — keep image builds lean
+# ========
+venv/
+.venv/
+__pycache__/
+*.py[cod]
+*.log
+.git/
+.gitignore
+.env
+.env.*
+!.env.example
+db.sqlite3
+media/
+staticfiles/
+*.md
+.idea/
+.vscode/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+*.pdf
