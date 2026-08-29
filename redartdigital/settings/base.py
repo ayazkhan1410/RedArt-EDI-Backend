@@ -40,7 +40,9 @@ INSTALLED_APPS = [
     "drf_spectacular",
     "django_celery_beat",
     # Project apps
+    "apps.core",
     "apps.trading_partner",
+    "apps.provider_billing_profile",
 ]
 
 MIDDLEWARE = [
@@ -133,7 +135,7 @@ REST_FRAMEWORK = {
         "rest_framework.filters.SearchFilter",
         "rest_framework.filters.OrderingFilter",
     ],
-    "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
+    "DEFAULT_PAGINATION_CLASS": "apps.core.pagination.StandardPagination",
     "PAGE_SIZE": 50,
     "DEFAULT_AUTHENTICATION_CLASSES": [
         "rest_framework.authentication.SessionAuthentication",
@@ -151,6 +153,10 @@ SPECTACULAR_SETTINGS = {
         {
             "name": "trading_partner",
             "description": "Trading partner CRUD (ISA/GS sender & receiver IDs).",
+        },
+        {
+            "name": "provider_billing_profile",
+            "description": "Provider billing profile CRUD (NPI / Medicaid billing identity).",
         },
     ],
 }

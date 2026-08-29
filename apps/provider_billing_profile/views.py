@@ -17,25 +17,33 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.core.pagination import StandardPagination
-from apps.trading_partner.choices import Environment
-from apps.trading_partner.models import TradingPartner
-from apps.trading_partner.serializers import (
-    TradingPartnerIdSerializer,
-    TradingPartnerListSerializer,
-    TradingPartnerSerializer,
+from apps.provider_billing_profile.models import ProviderBillingProfile
+from apps.provider_billing_profile.serializers import (
+    ProviderBillingProfileIdSerializer,
+    ProviderBillingProfileListSerializer,
+    ProviderBillingProfileSerializer,
 )
 
 logger = logging.getLogger(__name__)
 
-TAG = "trading_partner"
+TAG = "provider_billing_profile"
 
-PARTNER_WRITE_EXAMPLE = OpenApiExample(
-    "Sample trading partner",
+PROFILE_WRITE_EXAMPLE = OpenApiExample(
+    "Sample provider billing profile",
     value={
-        "name": "Colorado Medicaid Test TP",
-        "sender_id": "REDART001",
-        "receiver_id": "COHCPF",
-        "environment": "TEST",
+        "legal_name": "Al Shifa Bus Service LLC",
+        "billing_name": "Al Shifa Transportation",
+        "npi": "1234567890",
+        "taxonomy_code": "343800000X",
+        "medicaid_provider_id": "CO123456",
+        "address_line_1": "100 Main St",
+        "address_line_2": "Suite 2",
+        "city": "Denver",
+        "state": "CO",
+        "zip": "80202",
+        "country": "US",
+        "phone": "3035550100",
+        "email": "billing@example.com",
         "is_active": True,
     },
     request_only=True,
@@ -62,62 +70,54 @@ def success_response(message, data=None, status_code=status.HTTP_200_OK):
         parameters=[
             OpenApiParameter("page", int, required=False),
             OpenApiParameter("page_size", int, required=False),
-            OpenApiParameter(
-                "environment",
-                str,
-                required=False,
-                enum=["TEST", "PRODUCTION"],
-            ),
             OpenApiParameter("search", str, required=False),
             OpenApiParameter("include_inactive", str, required=False),
+            OpenApiParameter("state", str, required=False),
         ],
-        responses={200: TradingPartnerListSerializer(many=True)},
+        responses={200: ProviderBillingProfileListSerializer(many=True)},
     ),
     post=extend_schema(
         tags=[TAG],
-        request=TradingPartnerSerializer,
-        examples=[PARTNER_WRITE_EXAMPLE],
-        responses={201: TradingPartnerIdSerializer},
+        request=ProviderBillingProfileSerializer,
+        examples=[PROFILE_WRITE_EXAMPLE],
+        responses={201: ProviderBillingProfileIdSerializer},
     ),
 )
-class TradingPartnerListCreateAPIView(APIView):
+class ProviderBillingProfileListCreateAPIView(APIView):
     def get(self, request):
         try:
-            partners = TradingPartner.objects.all().order_by("-id")
+            profiles = ProviderBillingProfile.objects.all().order_by("-id")
 
             if request.query_params.get("include_inactive", "").lower() not in (
                 "1",
                 "true",
                 "yes",
             ):
-                partners = partners.filter(is_active=True)
+                profiles = profiles.filter(is_active=True)
 
-            environment = request.query_params.get("environment")
-            if environment:
-                environment = environment.strip().upper()
-                if environment not in Environment.values:
-                    return error_response(
-                        "Invalid environment. Use TEST or PRODUCTION.",
-                        errors={"environment": ["Invalid choice."]},
-                    )
-                partners = partners.filter(environment=environment)
+            state = request.query_params.get("state", "").strip()
+            if state:
+                profiles = profiles.filter(state__iexact=state)
 
             search = request.query_params.get("search", "").strip()
             if search:
-                partners = partners.filter(
-                    Q(name__icontains=search)
-                    | Q(sender_id__icontains=search)
-                    | Q(receiver_id__icontains=search)
+                profiles = profiles.filter(
+                    Q(legal_name__icontains=search)
+                    | Q(billing_name__icontains=search)
+                    | Q(npi__icontains=search)
+                    | Q(medicaid_provider_id__icontains=search)
+                    | Q(city__icontains=search)
+                    | Q(email__icontains=search)
                 )
 
             paginator = StandardPagination()
-            page = paginator.paginate_queryset(partners, request, view=self)
-            data = TradingPartnerListSerializer(page, many=True).data
+            page = paginator.paginate_queryset(profiles, request, view=self)
+            data = ProviderBillingProfileListSerializer(page, many=True).data
 
             return Response(
                 {
                     "success": True,
-                    "message": "Trading partners retrieved successfully.",
+                    "message": "Provider billing profiles retrieved successfully.",
                     "count": paginator.page.paginator.count,
                     "next": paginator.get_next_link(),
                     "previous": paginator.get_previous_link(),
@@ -127,7 +127,11 @@ class TradingPartnerListCreateAPIView(APIView):
         except ValidationError as exc:
             return error_response(
                 "Invalid pagination parameters.",
-                errors=exc.detail if isinstance(exc.detail, dict) else {"detail": exc.detail},
+                errors=(
+                    exc.detail
+                    if isinstance(exc.detail, dict)
+                    else {"detail": exc.detail}
+                ),
             )
         except NotFound:
             return error_response(
@@ -136,35 +140,44 @@ class TradingPartnerListCreateAPIView(APIView):
                 status_code=status.HTTP_404_NOT_FOUND,
             )
         except Exception:
-            logger.error("List trading partners failed:\n%s", traceback.format_exc())
+            logger.error(
+                "List provider billing profiles failed:\n%s",
+                traceback.format_exc(),
+            )
             return error_response(
-                "Unable to list trading partners.",
+                "Unable to list provider billing profiles.",
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
 
     def post(self, request):
         try:
-            serializer = TradingPartnerSerializer(data=request.data)
+            serializer = ProviderBillingProfileSerializer(data=request.data)
             if not serializer.is_valid():
                 return error_response("Validation failed.", errors=serializer.errors)
 
-            partner = serializer.save()
-            logger.info("Created trading partner id=%s", partner.id)
+            profile = serializer.save()
+            logger.info("Created provider billing profile id=%s", profile.id)
             return success_response(
-                "Trading partner created successfully.",
-                data={"id": partner.id},
+                "Provider billing profile created successfully.",
+                data={"id": profile.id},
                 status_code=status.HTTP_201_CREATED,
             )
         except IntegrityError:
-            logger.warning("Duplicate trading partner:\n%s", traceback.format_exc())
+            logger.warning(
+                "Integrity error creating provider billing profile:\n%s",
+                traceback.format_exc(),
+            )
             return error_response(
-                "A trading partner with these identifiers already exists.",
+                "Unable to create provider billing profile due to a conflict.",
                 status_code=status.HTTP_409_CONFLICT,
             )
         except Exception:
-            logger.error("Create trading partner failed:\n%s", traceback.format_exc())
+            logger.error(
+                "Create provider billing profile failed:\n%s",
+                traceback.format_exc(),
+            )
             return error_response(
-                "Unable to create trading partner.",
+                "Unable to create provider billing profile.",
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
 
@@ -172,19 +185,19 @@ class TradingPartnerListCreateAPIView(APIView):
 @extend_schema_view(
     get=extend_schema(
         tags=[TAG],
-        responses={200: TradingPartnerSerializer},
+        responses={200: ProviderBillingProfileSerializer},
     ),
     put=extend_schema(
         tags=[TAG],
-        request=TradingPartnerSerializer,
-        examples=[PARTNER_WRITE_EXAMPLE],
-        responses={200: TradingPartnerIdSerializer},
+        request=ProviderBillingProfileSerializer,
+        examples=[PROFILE_WRITE_EXAMPLE],
+        responses={200: ProviderBillingProfileIdSerializer},
     ),
     patch=extend_schema(
         tags=[TAG],
-        request=TradingPartnerSerializer,
-        examples=[PARTNER_WRITE_EXAMPLE],
-        responses={200: TradingPartnerIdSerializer},
+        request=ProviderBillingProfileSerializer,
+        examples=[PROFILE_WRITE_EXAMPLE],
+        responses={200: ProviderBillingProfileIdSerializer},
     ),
     delete=extend_schema(
         tags=[TAG],
@@ -196,30 +209,30 @@ class TradingPartnerListCreateAPIView(APIView):
                 description="Pass true to permanently delete instead of soft-deactivate.",
             ),
         ],
-        responses={200: TradingPartnerIdSerializer},
+        responses={200: ProviderBillingProfileIdSerializer},
     ),
 )
-class TradingPartnerDetailAPIView(APIView):
+class ProviderBillingProfileDetailAPIView(APIView):
     def get(self, request, pk):
         try:
-            partner = get_object_or_404(TradingPartner, pk=pk)
+            profile = get_object_or_404(ProviderBillingProfile, pk=pk)
             return success_response(
-                "Trading partner retrieved successfully.",
-                data=TradingPartnerSerializer(partner).data,
+                "Provider billing profile retrieved successfully.",
+                data=ProviderBillingProfileSerializer(profile).data,
             )
         except Http404:
             return error_response(
-                "Trading partner not found.",
+                "Provider billing profile not found.",
                 status_code=status.HTTP_404_NOT_FOUND,
             )
         except Exception:
             logger.error(
-                "Get trading partner id=%s failed:\n%s",
+                "Get provider billing profile id=%s failed:\n%s",
                 pk,
                 traceback.format_exc(),
             )
             return error_response(
-                "Unable to retrieve trading partner.",
+                "Unable to retrieve provider billing profile.",
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
 
@@ -231,50 +244,50 @@ class TradingPartnerDetailAPIView(APIView):
 
     def _update(self, request, pk, partial):
         try:
-            partner = get_object_or_404(TradingPartner, pk=pk)
-            serializer = TradingPartnerSerializer(
-                partner,
+            profile = get_object_or_404(ProviderBillingProfile, pk=pk)
+            serializer = ProviderBillingProfileSerializer(
+                profile,
                 data=request.data,
                 partial=partial,
             )
             if not serializer.is_valid():
                 return error_response("Validation failed.", errors=serializer.errors)
 
-            partner = serializer.save()
-            logger.info("Updated trading partner id=%s", partner.id)
+            profile = serializer.save()
+            logger.info("Updated provider billing profile id=%s", profile.id)
             return success_response(
-                "Trading partner updated successfully.",
-                data={"id": partner.id},
+                "Provider billing profile updated successfully.",
+                data={"id": profile.id},
             )
         except Http404:
             return error_response(
-                "Trading partner not found.",
+                "Provider billing profile not found.",
                 status_code=status.HTTP_404_NOT_FOUND,
             )
         except IntegrityError:
             logger.warning(
-                "Duplicate on update id=%s:\n%s",
+                "Integrity error updating provider billing profile id=%s:\n%s",
                 pk,
                 traceback.format_exc(),
             )
             return error_response(
-                "A trading partner with these identifiers already exists.",
+                "Unable to update provider billing profile due to a conflict.",
                 status_code=status.HTTP_409_CONFLICT,
             )
         except Exception:
             logger.error(
-                "Update trading partner id=%s failed:\n%s",
+                "Update provider billing profile id=%s failed:\n%s",
                 pk,
                 traceback.format_exc(),
             )
             return error_response(
-                "Unable to update trading partner.",
+                "Unable to update provider billing profile.",
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
 
     def delete(self, request, pk):
         try:
-            partner = get_object_or_404(TradingPartner, pk=pk)
+            profile = get_object_or_404(ProviderBillingProfile, pk=pk)
             hard_delete = request.query_params.get("hard", "").lower() in (
                 "1",
                 "true",
@@ -282,39 +295,39 @@ class TradingPartnerDetailAPIView(APIView):
             )
 
             if hard_delete:
-                partner_id = partner.id
-                partner.delete()
-                logger.info("Hard deleted trading partner id=%s", partner_id)
+                profile_id = profile.id
+                profile.delete()
+                logger.info("Hard deleted provider billing profile id=%s", profile_id)
                 return success_response(
-                    "Trading partner permanently deleted.",
-                    data={"id": partner_id},
+                    "Provider billing profile permanently deleted.",
+                    data={"id": profile_id},
                 )
 
-            if not partner.is_active:
+            if not profile.is_active:
                 return success_response(
-                    "Trading partner is already inactive.",
-                    data={"id": partner.id},
+                    "Provider billing profile is already inactive.",
+                    data={"id": profile.id},
                 )
 
-            partner.is_active = False
-            partner.save(update_fields=["is_active", "updated_at"])
-            logger.info("Deactivated trading partner id=%s", partner.id)
+            profile.is_active = False
+            profile.save(update_fields=["is_active", "updated_at"])
+            logger.info("Deactivated provider billing profile id=%s", profile.id)
             return success_response(
-                "Trading partner deactivated successfully.",
-                data={"id": partner.id},
+                "Provider billing profile deactivated successfully.",
+                data={"id": profile.id},
             )
         except Http404:
             return error_response(
-                "Trading partner not found.",
+                "Provider billing profile not found.",
                 status_code=status.HTTP_404_NOT_FOUND,
             )
         except Exception:
             logger.error(
-                "Delete trading partner id=%s failed:\n%s",
+                "Delete provider billing profile id=%s failed:\n%s",
                 pk,
                 traceback.format_exc(),
             )
             return error_response(
-                "Unable to delete trading partner.",
+                "Unable to delete provider billing profile.",
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
