@@ -5,7 +5,15 @@ from redartdigital.settings.base import env
 
 ALLOWED_HOSTS = env.list(
     "DJANGO_ALLOWED_HOSTS",
-    default=["localhost", "127.0.0.1", "web"],
+    default=["localhost", "127.0.0.1", "backend"],
+)
+
+CSRF_TRUSTED_ORIGINS = env.list(
+    "CSRF_TRUSTED_ORIGINS",
+    default=[
+        "http://127.0.0.1:7000",
+        "http://localhost:7000",
+    ],
 )
 
 # Terminate TLS at a reverse proxy in real deployments.

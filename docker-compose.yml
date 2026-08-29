@@ -1,16 +1,23 @@
 # ========
 # RedArt EDI — Docker Compose
 # One command: docker compose up --build
+# Daily use (no pip reinstall): docker compose up -d
 # ========
+
+x-app-image: &app_image
+  image: redart-edi:local
+  build:
+    context: .
+    dockerfile: Dockerfile
 
 services:
 
   # ========
   # PostgreSQL
   # ========
-  db:
+  postgres:
     image: postgres:16-alpine
-    container_name: redart_edi_db
+    container_name: postgres
     restart: unless-stopped
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-edi}
@@ -19,7 +26,8 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      # Host 7001 → container 5432 (avoids clash with local Postgres on 5432)
+      - "${POSTGRES_HOST_PORT:-7001}:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-edi} -d ${POSTGRES_DB:-edi}"]
       interval: 5s
@@ -31,10 +39,11 @@ services:
   # ========
   redis:
     image: redis:7-alpine
-    container_name: redart_edi_redis
+    container_name: redis
     restart: unless-stopped
     ports:
-      - "${REDIS_PORT:-6379}:6379"
+      # Host 7002 → container 6379
+      - "${REDIS_HOST_PORT:-7002}:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -42,32 +51,34 @@ services:
       retries: 10
 
   # ========
-  # Django web (Gunicorn)
+  # Django backend
   # ========
-  web:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: redart_edi_web
+  backend:
+    <<: *app_image
+    container_name: backend
     restart: unless-stopped
     command: web
     env_file:
       - .env
     environment:
       DJANGO_SETTINGS_MODULE: redartdigital.settings.docker
-      POSTGRES_HOST: db
+      POSTGRES_HOST: postgres
       POSTGRES_PORT: 5432
       POSTGRES_SSLMODE: disable
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/1
+      USE_GUNICORN: "false"
+      RUN_MIGRATE_ON_START: "true"
+      AUTO_RELOAD: "true"
     ports:
-      - "${WEB_PORT:-8000}:8000"
+      # Host 7000 → container 8000
+      - "${WEB_PORT:-7000}:8000"
     volumes:
       - .:/app
       - media_data:/app/media
       - static_data:/app/staticfiles
     depends_on:
-      db:
+      postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
@@ -81,61 +92,88 @@ services:
   # ========
   # Celery worker
   # ========
-  worker:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: redart_edi_worker
+  celery-worker:
+    <<: *app_image
+    container_name: celery-worker
     restart: unless-stopped
     command: worker
     env_file:
       - .env
     environment:
       DJANGO_SETTINGS_MODULE: redartdigital.settings.docker
-      POSTGRES_HOST: db
+      POSTGRES_HOST: postgres
       POSTGRES_PORT: 5432
       POSTGRES_SSLMODE: disable
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/1
+      AUTO_RELOAD: "true"
     volumes:
       - .:/app
       - media_data:/app/media
     depends_on:
-      db:
+      postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
-      web:
+      backend:
         condition: service_healthy
 
   # ========
   # Celery beat (scheduler)
   # ========
-  beat:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: redart_edi_beat
+  celery-beat:
+    <<: *app_image
+    container_name: celery-beat
     restart: unless-stopped
     command: beat
     env_file:
       - .env
     environment:
       DJANGO_SETTINGS_MODULE: redartdigital.settings.docker
-      POSTGRES_HOST: db
+      POSTGRES_HOST: postgres
       POSTGRES_PORT: 5432
       POSTGRES_SSLMODE: disable
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/1
+      AUTO_RELOAD: "true"
     volumes:
       - .:/app
     depends_on:
-      db:
+      postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
-      web:
+      backend:
         condition: service_healthy
+
+  # ========
+  # Flower (Celery monitoring UI)
+  # ========
+  flower:
+    <<: *app_image
+    container_name: flower
+    restart: unless-stopped
+    command: flower
+    env_file:
+      - .env
+    environment:
+      DJANGO_SETTINGS_MODULE: redartdigital.settings.docker
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_SSLMODE: disable
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
+      FLOWER_PORT: "5555"
+    ports:
+      # Host 7003 → container 5555
+      - "${FLOWER_HOST_PORT:-7003}:5555"
+    volumes:
+      - .:/app
+    depends_on:
+      redis:
+        condition: service_healthy
+      celery-worker:
+        condition: service_started
 
 # ========
 # Volumes

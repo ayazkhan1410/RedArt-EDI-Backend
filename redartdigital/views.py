@@ -4,6 +4,8 @@ from rest_framework.views import APIView
 
 
 class HealthCheckAPIView(APIView):
+    """Liveness endpoint for load balancers / ops."""
+
     authentication_classes = []
     permission_classes = [AllowAny]
 

@@ -9,14 +9,14 @@ set -euo pipefail
 # Wait for Postgres
 # ========
 wait_for_postgres() {
-  echo "[entrypoint] Waiting for Postgres at ${POSTGRES_HOST:-db}:${POSTGRES_PORT:-5432} ..."
+  echo "[entrypoint] Waiting for Postgres at ${POSTGRES_HOST:-postgres}:${POSTGRES_PORT:-5432} ..."
   python - <<'PY'
 import os
 import time
 
 import psycopg
 
-host = os.environ.get("POSTGRES_HOST", "db")
+host = os.environ.get("POSTGRES_HOST", "postgres")
 port = int(os.environ.get("POSTGRES_PORT", "5432"))
 user = os.environ.get("POSTGRES_USER", "edi")
 password = os.environ.get("POSTGRES_PASSWORD", "edi")
@@ -125,14 +125,62 @@ wait_for_postgres
 wait_for_redis
 
 # ========
-# Django migrate + static + beat schedules (web only)
+# Django migrate + beat schedules (web only)
+# migrate is safe/idempotent: "No migrations to apply" when already up to date
 # ========
+ensure_superuser() {
+  if [[ -z "${DJANGO_SUPERUSER_USERNAME:-}" ]]; then
+    return 0
+  fi
+  echo "[entrypoint] Ensuring Django superuser exists ..."
+  python - <<'PY'
+import os
+
+import django
+
+os.environ.setdefault(
+    "DJANGO_SETTINGS_MODULE",
+    os.environ.get("DJANGO_SETTINGS_MODULE", "redartdigital.settings.docker"),
+)
+django.setup()
+
+from django.contrib.auth import get_user_model
+
+User = get_user_model()
+username = os.environ["DJANGO_SUPERUSER_USERNAME"]
+email = os.environ.get("DJANGO_SUPERUSER_EMAIL", "admin@example.com")
+password = os.environ.get("DJANGO_SUPERUSER_PASSWORD", "")
+
+if not password:
+    print("[entrypoint] DJANGO_SUPERUSER_PASSWORD empty — skip superuser create")
+else:
+    user, created = User.objects.get_or_create(
+        username=username,
+        defaults={"email": email, "is_staff": True, "is_superuser": True},
+    )
+    user.email = email
+    user.is_staff = True
+    user.is_superuser = True
+    user.set_password(password)
+    user.save()
+    print(f"[entrypoint] Superuser {'created' if created else 'updated'}: {username}")
+PY
+}
+
 if [[ "${ROLE}" == "web" ]]; then
-  echo "[entrypoint] Running migrations ..."
-  python manage.py migrate --noinput
+  if [[ "${RUN_MIGRATE_ON_START:-true}" == "true" ]]; then
+    echo "[entrypoint] Running migrations ..."
+    python manage.py migrate --noinput
+  else
+    echo "[entrypoint] Skipping migrations (RUN_MIGRATE_ON_START=false)"
+  fi
   setup_celery_beat_schedules
-  echo "[entrypoint] Collecting static files ..."
-  python manage.py collectstatic --noinput
+  ensure_superuser
+  # collectstatic only needed for Gunicorn + WhiteNoise
+  if [[ "${USE_GUNICORN:-false}" == "true" ]]; then
+    echo "[entrypoint] Collecting static files ..."
+    python manage.py collectstatic --noinput
+  fi
 fi
 
 # ========
@@ -140,19 +188,56 @@ fi
 # ========
 case "${ROLE}" in
   web)
-    echo "[entrypoint] Starting Gunicorn ..."
-    exec gunicorn redartdigital.wsgi:application \
-      --bind 0.0.0.0:8000 \
-      --workers "${GUNICORN_WORKERS:-3}" \
-      --timeout "${GUNICORN_TIMEOUT:-120}"
+    # Local/Docker default: runserver (auto-reloads on .py changes).
+    # Set USE_GUNICORN=true for production-like serving.
+    if [[ "${USE_GUNICORN:-false}" == "true" ]]; then
+      if [[ "${AUTO_RELOAD:-false}" == "true" ]]; then
+        echo "[entrypoint] Starting Gunicorn with --reload ..."
+        exec gunicorn redartdigital.wsgi:application \
+          --bind 0.0.0.0:8000 \
+          --workers "${GUNICORN_WORKERS:-3}" \
+          --timeout "${GUNICORN_TIMEOUT:-120}" \
+          --reload
+      fi
+      echo "[entrypoint] Starting Gunicorn ..."
+      exec gunicorn redartdigital.wsgi:application \
+        --bind 0.0.0.0:8000 \
+        --workers "${GUNICORN_WORKERS:-3}" \
+        --timeout "${GUNICORN_TIMEOUT:-120}"
+    else
+      echo "[entrypoint] Starting Django runserver (auto-reload on) ..."
+      exec python manage.py runserver 0.0.0.0:8000
+    fi
     ;;
   worker)
+    if [[ "${AUTO_RELOAD:-true}" == "true" ]]; then
+      echo "[entrypoint] Starting Celery worker with auto-reload ..."
+      exec watchmedo auto-restart \
+        --directory=/app \
+        --pattern="*.py" \
+        --recursive \
+        -- \
+        celery -A redartdigital worker \
+          --loglevel="${CELERY_LOG_LEVEL:-INFO}" \
+          --concurrency="${CELERY_CONCURRENCY:-2}"
+    fi
     echo "[entrypoint] Starting Celery worker ..."
     exec celery -A redartdigital worker \
       --loglevel="${CELERY_LOG_LEVEL:-INFO}" \
       --concurrency="${CELERY_CONCURRENCY:-2}"
     ;;
   beat)
+    if [[ "${AUTO_RELOAD:-true}" == "true" ]]; then
+      echo "[entrypoint] Starting Celery beat with auto-reload ..."
+      exec watchmedo auto-restart \
+        --directory=/app \
+        --pattern="*.py" \
+        --recursive \
+        -- \
+        celery -A redartdigital beat \
+          --loglevel="${CELERY_LOG_LEVEL:-INFO}" \
+          --scheduler django_celery_beat.schedulers:DatabaseScheduler
+    fi
     echo "[entrypoint] Starting Celery beat ..."
     exec celery -A redartdigital beat \
       --loglevel="${CELERY_LOG_LEVEL:-INFO}" \
@@ -161,9 +246,16 @@ case "${ROLE}" in
   shell)
     exec python manage.py shell
     ;;
+  flower)
+    echo "[entrypoint] Starting Flower (Celery monitor) ..."
+    exec celery -A redartdigital flower \
+      --address=0.0.0.0 \
+      --port="${FLOWER_PORT:-5555}" \
+      --broker="${CELERY_BROKER_URL:-redis://redis:6379/0}"
+    ;;
   *)
     echo "[entrypoint] Unknown role: ${ROLE}"
-    echo "Usage: entrypoint.sh [web|worker|beat|shell]"
+    echo "Usage: entrypoint.sh [web|worker|beat|flower|shell]"
     exit 1
     ;;
 esac

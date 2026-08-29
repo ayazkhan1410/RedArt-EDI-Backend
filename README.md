@@ -30,9 +30,10 @@ cp .env.example .env
 
 | URL | Purpose |
 |-----|---------|
-| http://127.0.0.1:8000/api/health/ | Health check |
-| http://127.0.0.1:8000/api/docs/ | Swagger UI |
-| http://127.0.0.1:8000/admin/ | Django admin |
+| http://127.0.0.1:7000/api/health/ | Health check |
+| http://127.0.0.1:7000/api/docs/ | Swagger UI |
+| http://127.0.0.1:7000/admin/ | Django admin |
+| http://127.0.0.1:7003/ | Flower (Celery monitor) |
 
 ```bash
 ./scripts/start.sh logs    # follow logs

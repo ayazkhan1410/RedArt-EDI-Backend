@@ -30,10 +30,14 @@ case "${ACTION}" in
     # Build and run all services
     # ========
     echo "[start] Building and starting containers ..."
+    # Prefer cache: only rebuild layers when Dockerfile/requirements change
     docker compose up --build -d
     echo "[start] Stack is up."
-    echo "[start] API:    http://127.0.0.1:8000/api/health/"
-    echo "[start] Docs:   http://127.0.0.1:8000/api/docs/"
+    echo "[start] Tip: day-to-day use  →  docker compose up -d   (no pip reinstall)"
+    echo "[start] Tip: deps/Dockerfile →  docker compose up --build -d"
+    echo "[start] API:    http://127.0.0.1:7000/api/health/"
+    echo "[start] Docs:   http://127.0.0.1:7000/api/docs/"
+    echo "[start] Flower: http://127.0.0.1:7003/"
     echo "[start] Logs:   ./scripts/start.sh logs"
     ;;
   down|stop)

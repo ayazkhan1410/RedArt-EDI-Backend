@@ -13,11 +13,11 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 # ========
 # System packages
+# (Check-Valid-Until=false avoids Docker Desktop clock-skew apt failures)
+# psycopg[binary] does not need libpq-dev / build-essential
 # ========
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends \
-        build-essential \
-        libpq-dev \
+RUN apt-get -o Acquire::Check-Valid-Until=false -o Acquire::Check-Date=false update \
+    && apt-get -o Acquire::Check-Valid-Until=false -o Acquire::Check-Date=false install -y --no-install-recommends \
         curl \
     && rm -rf /var/lib/apt/lists/*
 
