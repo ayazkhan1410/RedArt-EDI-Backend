@@ -10,18 +10,21 @@ class ProviderBillingProfileAdmin(admin.ModelAdmin):
         "legal_name",
         "billing_name",
         "npi",
+        "location_id",
         "medicaid_provider_id",
+        "revalidation_date",
         "city",
         "state",
         "is_active",
         "created_at",
         "updated_at",
     )
-    list_filter = ("is_active", "state", "country", "created_at")
+    list_filter = ("is_active", "state", "country", "revalidation_date", "created_at")
     search_fields = (
         "legal_name",
         "billing_name",
         "npi",
+        "location_id",
         "medicaid_provider_id",
         "city",
         "email",
@@ -40,7 +43,9 @@ class ProviderBillingProfileAdmin(admin.ModelAdmin):
                     "billing_name",
                     "npi",
                     "taxonomy_code",
+                    "location_id",
                     "medicaid_provider_id",
+                    "revalidation_date",
                     "is_active",
                 )
             },
