@@ -39,6 +39,8 @@ INSTALLED_APPS = [
     "django_filters",
     "drf_spectacular",
     "django_celery_beat",
+    # Project apps
+    "apps.trading_partner",
 ]
 
 MIDDLEWARE = [
@@ -145,6 +147,12 @@ SPECTACULAR_SETTINGS = {
     "TITLE": "RedArt EDI API",
     "DESCRIPTION": "Colorado Medicaid 837P EDI microservice",
     "VERSION": "0.1.0",
+    "TAGS": [
+        {
+            "name": "trading_partner",
+            "description": "Trading partner CRUD (ISA/GS sender & receiver IDs).",
+        },
+    ],
 }
 
 CORS_ALLOWED_ORIGINS = env.list("CORS_ALLOWED_ORIGINS", default=[])
