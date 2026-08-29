@@ -52,6 +52,9 @@ outbox/
 *.x12
 *.edi
 
+# Reference PDFs (keep local; do not commit)
+*.pdf
+
 # Local DB dumps
 *.sqlite3
 *.dump
