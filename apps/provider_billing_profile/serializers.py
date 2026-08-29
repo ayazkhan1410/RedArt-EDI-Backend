@@ -7,7 +7,9 @@ WRITE_FIELDS = (
     "billing_name",
     "npi",
     "taxonomy_code",
+    "location_id",
     "medicaid_provider_id",
+    "revalidation_date",
     "city",
     "zip",
     "state",
@@ -52,6 +54,9 @@ class ProviderBillingProfileSerializer(serializers.ModelSerializer):
     def validate_taxonomy_code(self, value):
         return clean_optional_text(value)
 
+    def validate_location_id(self, value):
+        return clean_optional_text(value)
+
     def validate_medicaid_provider_id(self, value):
         return clean_optional_text(value)
 
@@ -94,6 +99,7 @@ class ProviderBillingProfileListSerializer(serializers.ModelSerializer):
             "legal_name",
             "billing_name",
             "npi",
+            "location_id",
             "medicaid_provider_id",
             "city",
             "state",

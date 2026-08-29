@@ -31,11 +31,13 @@ TAG = "provider_billing_profile"
 PROFILE_WRITE_EXAMPLE = OpenApiExample(
     "Sample provider billing profile",
     value={
-        "legal_name": "Al Shifa Bus Service LLC",
-        "billing_name": "Al Shifa Transportation",
-        "npi": "1234567890",
-        "taxonomy_code": "343800000X",
+        "legal_name": "WALLA INVESTMENT LLC",
+        "billing_name": "WALLA INVESTMENT LLC",
+        "npi": "1750058525",
+        "taxonomy_code": "343900000X",
+        "location_id": "9000201481",
         "medicaid_provider_id": "CO123456",
+        "revalidation_date": "2029-11-25",
         "address_line_1": "100 Main St",
         "address_line_2": "Suite 2",
         "city": "Denver",
@@ -105,6 +107,7 @@ class ProviderBillingProfileListCreateAPIView(APIView):
                     Q(legal_name__icontains=search)
                     | Q(billing_name__icontains=search)
                     | Q(npi__icontains=search)
+                    | Q(location_id__icontains=search)
                     | Q(medicaid_provider_id__icontains=search)
                     | Q(city__icontains=search)
                     | Q(email__icontains=search)
