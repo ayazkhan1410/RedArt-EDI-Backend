@@ -59,6 +59,8 @@ POSTGRES_HOST=127.0.0.1 POSTGRES_PORT=7001 POSTGRES_DB=edi POSTGRES_USER=edi POS
 | `apps.patient` | Member; **`county`** drives 52 vs 125 |
 | `apps.nemt_trip` | Ride; FKs patient + provider; long-distance-check API |
 | `apps.long_distance_rule` | DB rules STANDARD 52/25, DESIGNATED_RURAL 125/25 (seeded) |
+| `apps.claim` | Claim (trip_id only); create-from-trip applies long-distance flags |
+| `apps.claim_service_line` | Billable lines (procedure / units / mileage / charge) |
 
 API mount: single include → `redartdigital/api_v1_urls.py` under `/api/v1/`.
 
@@ -69,6 +71,8 @@ Useful endpoints:
 - `/api/v1/patients/`
 - `/api/v1/nemt-trips/` + `/api/v1/nemt-trips/<id>/long-distance-check/`
 - `/api/v1/long-distance-rules/`
+- `/api/v1/claims/` + `/api/v1/claims/from-trip/`
+- `/api/v1/claim-service-lines/`
 
 Patterns in place:
 
@@ -88,7 +92,7 @@ Patterns in place:
 **ClaimDocument** = files; **AttachmentSubmission** = transmission channel/reference.  
 **LongDistanceRule** in DB (done). Rural county list still empty in `DESIGNATED_RURAL_COUNTIES` — until filled, everyone is STANDARD.
 
-Planned entities still to build: Claim, ClaimServiceLine, ClaimDocument, AttachmentSubmission, SubmissionBatch, BatchClaim, EDIFile, EDIControlNumber, EDIAcknowledgement.
+Planned entities still to build: ClaimDocument, AttachmentSubmission, SubmissionBatch, BatchClaim, EDIFile, EDIControlNumber, EDIAcknowledgement.
 
 Claim flags when coding: `attachment_required`, `attachment_route`, `attachment_status`, `external_id`, diagnosis, POS, etc.  
 EDIFile: `status`, `uploaded_at`, `path`/`blob_ref`. BatchClaim: `st02`. EDIControlNumber: `environment`. EDIAcknowledgement: `affected_st02`, `raw_file_ref`.
@@ -110,8 +114,8 @@ Do **not** re-decide `attachment_required` after 999 — set at rules stage and 
 ## Next to build
 
 1. Populate rural counties (or county table) so DESIGNATED_RURAL actually applies  
-2. **Claim** (+ ClaimServiceLine) — Claim only `trip_id`  
-3. ClaimDocument + AttachmentSubmission  
+2. ClaimDocument + AttachmentSubmission  
+3. Doc completeness + **block submit**  
 4. SubmissionBatch / BatchClaim / EDIFile / control numbers / 999  
 5. Validator + 837P generator APIs  
 6. Service auth for RedArt → EDI  

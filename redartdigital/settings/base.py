@@ -46,6 +46,8 @@ INSTALLED_APPS = [
     "apps.patient",
     "apps.nemt_trip",
     "apps.long_distance_rule",
+    "apps.claim",
+    "apps.claim_service_line",
 ]
 
 MIDDLEWARE = [
@@ -172,6 +174,14 @@ SPECTACULAR_SETTINGS = {
         {
             "name": "long_distance_rule",
             "description": "Configurable 52/125 and 25+ mile thresholds by county type.",
+        },
+        {
+            "name": "claim",
+            "description": "Claim CRUD and create-from-trip with long-distance flags.",
+        },
+        {
+            "name": "claim_service_line",
+            "description": "Claim service line CRUD (procedure / units / charge).",
         },
     ],
 }

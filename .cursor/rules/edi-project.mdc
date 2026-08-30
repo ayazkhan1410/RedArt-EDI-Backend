@@ -1,8 +1,6 @@
 ---
-description: RedArt EDI project conventions and locked decisions
 alwaysApply: true
 ---
-
 # RedArt EDI — agent rules
 
 ## Product
@@ -14,7 +12,7 @@ Colorado Medicaid NEMT → X12 **837P** microservice for RedArt. Read `docs/HAND
 - Apps live under `apps.*`; shared `BaseModel` in `apps.core`
 - Approval-first for schema/API changes when the user’s rules require it; never invent migrations without ask unless they explicitly request migrate
 - Serializers: validation only. Business helpers → `utils/service.py`; cleaning/parsers → `utils/validators.py`
-- No N+1: use `select_related` / `prefetch_related` (see `NemtTrip.objects.with_relations()`)
+- No N+1: use `select_related` / `prefetch_related` (`NemtTrip.objects.with_relations()`, `Claim.objects.with_relations()`)
 - Soft delete by default; writes return `{id}` only; shared pagination `StandardPagination`
 - Wire new APIs only in `redartdigital/api_v1_urls.py` (one `/api/v1/` include)
 - Prefer human, minimal code — avoid AI-looking patterns (e.g. unnecessary `.only(*CONST)`)
