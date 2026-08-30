@@ -2,6 +2,7 @@ from datetime import date
 
 from rest_framework import serializers
 
+from apps.patient.choices import Gender
 from apps.patient.models import Patient
 
 WRITE_FIELDS = (
@@ -9,8 +10,15 @@ WRITE_FIELDS = (
     "last_name",
     "email",
     "date_of_birth",
+    "gender",
     "medicaid_member_id",
     "county",
+    "address_line_1",
+    "address_line_2",
+    "city",
+    "state",
+    "zip",
+    "phone",
     "is_active",
 )
 
@@ -32,6 +40,10 @@ def clean_optional_text(value):
 
 
 class PatientSerializer(serializers.ModelSerializer):
+    gender = serializers.CharField(
+        required=False, allow_blank=True, allow_null=True
+    )
+
     class Meta:
         model = Patient
         fields = ("id",) + WRITE_FIELDS + ("created_at", "updated_at")
@@ -52,6 +64,38 @@ class PatientSerializer(serializers.ModelSerializer):
 
     def validate_county(self, value):
         return clean_required_text(value, "county")
+
+    def validate_gender(self, value):
+        if value in (None, ""):
+            return None
+        value = str(value).strip().upper()
+        if value not in Gender.values:
+            raise serializers.ValidationError("Invalid gender. Use M, F, or U.")
+        return value
+
+    def validate_address_line_1(self, value):
+        return clean_optional_text(value)
+
+    def validate_address_line_2(self, value):
+        return clean_optional_text(value)
+
+    def validate_city(self, value):
+        return clean_optional_text(value)
+
+    def validate_state(self, value):
+        value = clean_optional_text(value)
+        if value is None:
+            return value
+        value = value.upper()
+        if len(value) != 2:
+            raise serializers.ValidationError("state must be a 2-letter code.")
+        return value
+
+    def validate_zip(self, value):
+        return clean_optional_text(value)
+
+    def validate_phone(self, value):
+        return clean_optional_text(value)
 
     def validate_date_of_birth(self, value):
         if value is None:
@@ -89,6 +133,9 @@ class PatientListSerializer(serializers.ModelSerializer):
             "last_name",
             "medicaid_member_id",
             "county",
+            "city",
+            "state",
+            "gender",
             "date_of_birth",
             "is_active",
             "created_at",

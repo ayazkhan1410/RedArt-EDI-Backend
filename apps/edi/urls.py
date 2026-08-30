@@ -1,0 +1,75 @@
+from django.urls import path
+
+from apps.edi.sftp_views import (
+    SFTPCredentialsDetailAPIView,
+    SFTPCredentialsListCreateAPIView,
+    SFTPDirectoryDetailAPIView,
+    SFTPDirectoryListCreateAPIView,
+)
+from apps.edi.views import (
+    EDIControlNumberAllocateAPIView,
+    EDIControlNumberDetailAPIView,
+    EDIControlNumberListCreateAPIView,
+    EDIFileDetailAPIView,
+    EDIFileFromBatchAPIView,
+    EDIFileListCreateAPIView,
+    EDIFileMarkUploadedAPIView,
+)
+
+urlpatterns = [
+    path(
+        "edi-control-numbers/",
+        EDIControlNumberListCreateAPIView.as_view(),
+        name="edi-control-number-list-create",
+    ),
+    path(
+        "edi-control-numbers/allocate/",
+        EDIControlNumberAllocateAPIView.as_view(),
+        name="edi-control-number-allocate",
+    ),
+    path(
+        "edi-control-numbers/<int:pk>/",
+        EDIControlNumberDetailAPIView.as_view(),
+        name="edi-control-number-detail",
+    ),
+    path(
+        "edi-files/",
+        EDIFileListCreateAPIView.as_view(),
+        name="edi-file-list-create",
+    ),
+    path(
+        "edi-files/from-batch/",
+        EDIFileFromBatchAPIView.as_view(),
+        name="edi-file-from-batch",
+    ),
+    path(
+        "edi-files/<int:pk>/mark-uploaded/",
+        EDIFileMarkUploadedAPIView.as_view(),
+        name="edi-file-mark-uploaded",
+    ),
+    path(
+        "edi-files/<int:pk>/",
+        EDIFileDetailAPIView.as_view(),
+        name="edi-file-detail",
+    ),
+    path(
+        "sftp-credentials/",
+        SFTPCredentialsListCreateAPIView.as_view(),
+        name="sftp-credentials-list-create",
+    ),
+    path(
+        "sftp-credentials/<int:pk>/",
+        SFTPCredentialsDetailAPIView.as_view(),
+        name="sftp-credentials-detail",
+    ),
+    path(
+        "sftp-directories/",
+        SFTPDirectoryListCreateAPIView.as_view(),
+        name="sftp-directory-list-create",
+    ),
+    path(
+        "sftp-directories/<int:pk>/",
+        SFTPDirectoryDetailAPIView.as_view(),
+        name="sftp-directory-detail",
+    ),
+]

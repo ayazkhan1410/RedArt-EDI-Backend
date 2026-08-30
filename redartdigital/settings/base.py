@@ -46,6 +46,9 @@ INSTALLED_APPS = [
     "apps.patient",
     "apps.nemt_trip",
     "apps.long_distance_rule",
+    "apps.claim",
+    "apps.claim_service_line",
+    "apps.edi",
 ]
 
 MIDDLEWARE = [
@@ -173,6 +176,14 @@ SPECTACULAR_SETTINGS = {
             "name": "long_distance_rule",
             "description": "Configurable 52/125 and 25+ mile thresholds by county type.",
         },
+        {
+            "name": "claim",
+            "description": "Claim CRUD and create-from-trip with long-distance flags.",
+        },
+        {
+            "name": "claim_service_line",
+            "description": "Claim service line CRUD (procedure / units / charge).",
+        },
     ],
 }
 
@@ -193,12 +204,25 @@ CELERY_TASK_TIME_LIMIT = env.int("CELERY_TASK_TIME_LIMIT", default=30 * 60)
 CELERY_TASK_ALWAYS_EAGER = env("CELERY_TASK_ALWAYS_EAGER")
 # Auto-expire task results after 24 hours (defense in depth with daily flush).
 CELERY_RESULT_EXPIRES = env.int("CELERY_RESULT_EXPIRES", default=60 * 60 * 24)
+# Celery Beat
 CELERY_BEAT_SCHEDULER = "django_celery_beat.schedulers:DatabaseScheduler"
 CELERY_BEAT_SCHEDULE = {
     "cleanup-celery-storage-every-24h": {
         "task": "redartdigital.tasks.cleanup_celery_storage",
         "schedule": 60 * 60 * 24,
     },
+}
+
+# X12 837P envelope constants (sender/receiver IDs come from TradingPartner).
+EDI_ENVELOPE = {
+    "isa05": env("EDI_ISA05", default="ZZ"),
+    "isa07": env("EDI_ISA07", default="ZZ"),
+    "gs01": env("EDI_GS01", default="HC"),
+    "gs08": env("EDI_GS08", default="005010X222A1"),
+    "element_separator": env("EDI_ELEMENT_SEPARATOR", default="*"),
+    "component_separator": env("EDI_COMPONENT_SEPARATOR", default=":"),
+    "segment_terminator": env("EDI_SEGMENT_TERMINATOR", default="~"),
+    "repetition_separator": env("EDI_REPETITION_SEPARATOR", default="^"),
 }
 
 LOGGING = {
