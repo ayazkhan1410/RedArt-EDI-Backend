@@ -43,6 +43,7 @@ INSTALLED_APPS = [
     "apps.core",
     "apps.trading_partner",
     "apps.provider_billing_profile",
+    "apps.patient",
 ]
 
 MIDDLEWARE = [
@@ -157,6 +158,10 @@ SPECTACULAR_SETTINGS = {
         {
             "name": "provider_billing_profile",
             "description": "Provider billing profile CRUD (NPI / Medicaid billing identity).",
+        },
+        {
+            "name": "patient",
+            "description": "Patient / Medicaid member CRUD (county drives long-distance rules).",
         },
     ],
 }
