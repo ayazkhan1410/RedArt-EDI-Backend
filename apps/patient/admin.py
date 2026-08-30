@@ -10,20 +10,23 @@ class PatientAdmin(admin.ModelAdmin):
         "first_name",
         "last_name",
         "medicaid_member_id",
+        "gender",
         "county",
+        "city",
+        "state",
         "date_of_birth",
-        "email",
         "is_active",
         "created_at",
-        "updated_at",
     )
-    list_filter = ("is_active", "county", "created_at")
+    list_filter = ("is_active", "gender", "county", "state", "created_at")
     search_fields = (
         "first_name",
         "last_name",
         "medicaid_member_id",
         "county",
+        "city",
         "email",
+        "phone",
     )
     ordering = ("-id",)
     list_per_page = 50
@@ -37,15 +40,26 @@ class PatientAdmin(admin.ModelAdmin):
                     "first_name",
                     "last_name",
                     "date_of_birth",
+                    "gender",
                     "medicaid_member_id",
                     "county",
                     "email",
+                    "phone",
                     "is_active",
                 )
             },
         ),
         (
-            "Timestamps",
-            {"fields": ("created_at", "updated_at")},
+            "Address",
+            {
+                "fields": (
+                    "address_line_1",
+                    "address_line_2",
+                    "city",
+                    "state",
+                    "zip",
+                )
+            },
         ),
+        ("Timestamps", {"fields": ("created_at", "updated_at")}),
     )

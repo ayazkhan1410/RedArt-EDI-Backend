@@ -207,21 +207,27 @@ class Command(BaseCommand):
 
     def _seed_patients(self):
         rows = [
-            ("Ali", "Khan", "DEMO-M0001", "Denver", date(1995, 5, 12)),
-            ("Sara", "Ahmed", "DEMO-M0002", "Aurora", date(1988, 3, 20)),
-            ("Omar", "Hassan", "DEMO-M0003", "Denver", date(2001, 7, 8)),
-            ("Fatima", "Noor", "DEMO-M0004", "Lakewood", date(1979, 11, 2)),
-            ("Yusuf", "Rahman", "DEMO-M0005", "Denver", date(1992, 1, 15)),
+            ("Ali", "Khan", "DEMO-M0001", "Denver", date(1995, 5, 12), "M"),
+            ("Sara", "Ahmed", "DEMO-M0002", "Aurora", date(1988, 3, 20), "F"),
+            ("Omar", "Hassan", "DEMO-M0003", "Denver", date(2001, 7, 8), "M"),
+            ("Fatima", "Noor", "DEMO-M0004", "Lakewood", date(1979, 11, 2), "F"),
+            ("Yusuf", "Rahman", "DEMO-M0005", "Denver", date(1992, 1, 15), "M"),
         ]
         patients = []
-        for first, last, mid, county, dob in rows:
+        for first, last, mid, county, dob, gender in rows:
             obj, _ = Patient.objects.update_or_create(
                 medicaid_member_id=mid,
                 defaults={
                     "first_name": first,
                     "last_name": last,
                     "date_of_birth": dob,
+                    "gender": gender,
                     "county": county,
+                    "address_line_1": f"{100 + len(patients)} Main St",
+                    "city": county,
+                    "state": "CO",
+                    "zip": "80202",
+                    "phone": "3035550100",
                     "email": f"{first.lower()}.{last.lower()}@example.com",
                     "is_active": True,
                 },

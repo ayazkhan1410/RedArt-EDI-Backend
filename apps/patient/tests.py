@@ -107,3 +107,42 @@ class PatientAPITests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         patient.refresh_from_db()
         self.assertEqual(patient.county, "Aurora")
+
+    def test_demographics_and_invalid_state(self):
+        url = reverse("patient-list-create")
+        created = self.client.post(
+            url,
+            {
+                "first_name": "Ali",
+                "last_name": "Khan",
+                "date_of_birth": "1995-05-12",
+                "gender": "m",
+                "medicaid_member_id": "MDEM001",
+                "county": "Denver",
+                "address_line_1": "100 Main St",
+                "city": "Denver",
+                "state": "co",
+                "zip": "80202",
+                "phone": "3035550100",
+            },
+            format="json",
+        )
+        self.assertEqual(created.status_code, status.HTTP_201_CREATED)
+        patient = Patient.objects.get(pk=created.data["data"]["id"])
+        self.assertEqual(patient.gender, "M")
+        self.assertEqual(patient.state, "CO")
+        self.assertTrue(patient.has_837p_demographics())
+
+        bad = self.client.post(
+            url,
+            {
+                "first_name": "Bad",
+                "last_name": "State",
+                "date_of_birth": "1990-01-01",
+                "medicaid_member_id": "MBADSTATE",
+                "county": "Denver",
+                "state": "COLORADO",
+            },
+            format="json",
+        )
+        self.assertEqual(bad.status_code, status.HTTP_400_BAD_REQUEST)

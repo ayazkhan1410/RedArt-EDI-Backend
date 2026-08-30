@@ -11,6 +11,7 @@ from apps.claim.choices import (
 from apps.claim.models import BatchClaim, Claim, ClaimDocument, SubmissionBatch
 from apps.claim.utils.validators import clean_optional_text, ensure_non_negative
 from apps.trading_partner.choices import Environment
+from apps.trading_partner.models import TradingPartner
 
 
 class ClaimSerializer(serializers.ModelSerializer):
@@ -298,6 +299,12 @@ class ClaimDocumentIdSerializer(serializers.Serializer):
 
 
 class SubmissionBatchSerializer(serializers.ModelSerializer):
+    trading_partner = serializers.PrimaryKeyRelatedField(
+        queryset=TradingPartner.objects.filter(is_active=True),
+        required=True,
+        allow_null=False,
+    )
+
     class Meta:
         model = SubmissionBatch
         fields = (
@@ -349,6 +356,10 @@ class SubmissionBatchSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError(
                 "Trading partner not found or inactive."
             )
+        if not value.sender_id or not value.receiver_id:
+            raise serializers.ValidationError(
+                "Trading partner must have sender_id and receiver_id."
+            )
         return value
 
     def validate(self, attrs):
@@ -363,6 +374,19 @@ class SubmissionBatchSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError(
                     {"batch_number": ["This batch_number already exists."]}
                 )
+
+        # On create, trading_partner is always required (field-level).
+        # On partial update, block clearing it to null if sent.
+        if self.instance is not None and "trading_partner" in attrs:
+            if attrs.get("trading_partner") is None:
+                raise serializers.ValidationError(
+                    {"trading_partner": ["trading_partner cannot be cleared."]}
+                )
+
+        # Default batch environment from trading partner when omitted on create.
+        partner = attrs.get("trading_partner")
+        if partner is not None and "environment" not in attrs and self.instance is None:
+            attrs["environment"] = partner.environment or Environment.TEST
         return attrs
 
 

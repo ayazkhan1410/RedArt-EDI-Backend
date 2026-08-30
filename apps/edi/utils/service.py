@@ -7,6 +7,7 @@ from apps.claim.choices import BatchStatus
 from apps.claim.models import SubmissionBatch
 from apps.edi.choices import EDIFileStatus, TransactionType
 from apps.edi.models import EDIControlNumber, EDIFile
+from apps.edi.utils.readiness import assert_batch_ready_for_837p_generation
 
 
 def _digits_only(value):
@@ -147,6 +148,9 @@ def create_edi_file_for_batch(
     )
     if batch is None:
         raise ValueError("Batch not found or inactive.")
+
+    # Docs complete + demographics + trading partner + service lines.
+    assert_batch_ready_for_837p_generation(batch)
 
     if batch.claim_count < 1:
         raise ValueError("Batch has no claims; cannot create EDI file.")

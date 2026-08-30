@@ -124,10 +124,12 @@ Do **not** re-decide `attachment_required` after 999 — set at rules stage and 
 1. Populate rural counties (or county table) so DESIGNATED_RURAL actually applies  
 2. AttachmentSubmission (separate channel tracking; ClaimDocument already exists)  
 3. EDIAcknowledgement (999 parsing / store)  
-4. Validator + 837P **payload** generator (EDIFile metadata exists; X12 body not yet)  
-5. Service auth for RedArt → EDI  
+4. **837P payload generator + generate API** (readiness + envelope config done; X12 body not yet)  
+5. SFTP client using SFTPCredentials/SFTPDirectory  
+6. Service auth for RedArt → EDI  
 
-Build model-by-model: propose → approve → code → migrate when asked.
+Patient demographics (gender/address) and `EDI_ENVELOPE` settings are in place.  
+Use `apps.edi.utils.readiness.assert_batch_ready_for_837p_generation` before generate.
 
 ---
 

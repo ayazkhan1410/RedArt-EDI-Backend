@@ -11,6 +11,8 @@ from apps.claim.models import BatchClaim, Claim, ClaimDocument, SubmissionBatch
 from apps.claim.utils.service import create_claim_from_trip, sync_claim_document_status
 from apps.edi.choices import EDIFileStatus
 from apps.edi.models import EDIControlNumber, EDIFile
+from apps.edi.utils.envelope import get_edi_envelope_config
+from apps.edi.utils.readiness import assert_batch_ready_for_837p_generation
 from apps.edi.utils.service import (
     allocate_control_numbers,
     build_colorado_837p_filename,
@@ -44,8 +46,14 @@ class EDIFixturesMixin:
             first_name="Ali",
             last_name="Khan",
             date_of_birth=date(1995, 5, 12),
+            gender="M",
             medicaid_member_id="MEDI001",
             county="Denver",
+            address_line_1="100 Main St",
+            city="Denver",
+            state="CO",
+            zip="80202",
+            phone="3035550100",
         )
         self.provider = ProviderBillingProfile.objects.create(
             legal_name="Al Shifa",
@@ -64,7 +72,9 @@ class EDIFixturesMixin:
         self.claim, _ = create_claim_from_trip(
             trip_id=self.trip.id,
             claim_number="C-EDI-1",
-            create_service_line=False,
+            diagnosis_code="R68.89",
+            place_of_service="41",
+            create_service_line=True,
         )
         for doc_type, name, digest in (
             (DocumentType.STANDARD_TRIP_LOG, "trip.pdf", "H1"),
@@ -114,7 +124,13 @@ class EDIServiceTests(EDIFixturesMixin, TestCase):
         self.assertTrue(name.startswith("TP123456-837P-"))
         self.assertTrue(name.endswith("-1of1.txt"))
 
+        envelope = get_edi_envelope_config("TEST")
+        self.assertEqual(envelope["isa15"], "T")
+        self.assertEqual(envelope["gs08"], "005010X222A1")
+        self.assertEqual(get_edi_envelope_config("PRODUCTION")["isa15"], "P")
+
     def test_create_edi_file_and_mark_uploaded(self):
+        assert_batch_ready_for_837p_generation(self.batch)
         edi_file = create_edi_file_for_batch(
             batch_id=self.batch.id,
             file_hash="FILEHASH123",
@@ -135,6 +151,12 @@ class EDIServiceTests(EDIFixturesMixin, TestCase):
         self.assertIsNotNone(uploaded.uploaded_at)
         self.batch.refresh_from_db()
         self.assertEqual(self.batch.status, BatchStatus.SUBMITTED)
+
+    def test_missing_patient_demographics_blocks_edi_file(self):
+        self.patient.address_line_1 = None
+        self.patient.save(update_fields=["address_line_1", "updated_at"])
+        with self.assertRaises(ValueError):
+            create_edi_file_for_batch(batch_id=self.batch.id)
 
 
 class EDIAPITests(EDIFixturesMixin, APITestCase):
