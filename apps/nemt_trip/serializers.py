@@ -147,6 +147,7 @@ class NemtTripIdSerializer(serializers.Serializer):
 class LongDistanceCheckSerializer(serializers.Serializer):
     county = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     county_type = serializers.CharField()
+    rule_id = serializers.IntegerField(allow_null=True)
     verification_threshold = serializers.FloatField()
     review_threshold = serializers.IntegerField()
     one_way_miles = serializers.FloatField(allow_null=True)

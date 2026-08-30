@@ -1,12 +1,12 @@
 """Domain services for NEMT trips (not serializers)."""
 
-from apps.nemt_trip.utils.mileage import evaluate_trip_mileage
+from apps.long_distance_rule.utils.service import evaluate_trip_mileage
 
 
 def build_long_distance_payload(trip):
     """
     Build long-distance / attachment flags for a trip using patient county
-    and trip mileage fields.
+    and trip mileage fields against LongDistanceRule rows.
     """
     county = None
     if trip.patient_id:
