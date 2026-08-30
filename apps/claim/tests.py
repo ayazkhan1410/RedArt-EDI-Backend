@@ -151,3 +151,15 @@ class ClaimAPITests(ClaimFixturesMixin, APITestCase):
         )
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertFalse(response.data["success"])
+
+    def test_soft_delete_claim(self):
+        claim, _ = create_claim_from_trip(
+            trip_id=self.trip.id,
+            claim_number="C001",
+            create_service_line=False,
+        )
+        url = reverse("claim-detail", kwargs={"pk": claim.id})
+        response = self.client.delete(url)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        claim.refresh_from_db()
+        self.assertFalse(claim.is_active)

@@ -75,3 +75,16 @@ class ClaimServiceLineAPITests(APITestCase):
             format="json",
         )
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_soft_delete(self):
+        line = ClaimServiceLine.objects.create(
+            claim=self.claim,
+            procedure_code="A0100",
+            units=5,
+            charge=Decimal("25.00"),
+        )
+        url = reverse("claim-service-line-detail", kwargs={"pk": line.id})
+        response = self.client.delete(url)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        line.refresh_from_db()
+        self.assertFalse(line.is_active)
