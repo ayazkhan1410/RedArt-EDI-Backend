@@ -1,0 +1,34 @@
+---
+description: RedArt EDI project conventions and locked decisions
+alwaysApply: true
+---
+
+# RedArt EDI — agent rules
+
+## Product
+
+Colorado Medicaid NEMT → X12 **837P** microservice for RedArt. Read `docs/HANDOFF.md` for full context.
+
+## Coding conventions
+
+- Apps live under `apps.*`; shared `BaseModel` in `apps.core`
+- Approval-first for schema/API changes when the user’s rules require it; never invent migrations without ask unless they explicitly request migrate
+- Serializers: validation only. Business helpers → `utils/service.py`; cleaning/parsers → `utils/validators.py`
+- No N+1: use `select_related` / `prefetch_related` (see `NemtTrip.objects.with_relations()`)
+- Soft delete by default; writes return `{id}` only; shared pagination `StandardPagination`
+- Wire new APIs only in `redartdigital/api_v1_urls.py` (one `/api/v1/` include)
+- Prefer human, minimal code — avoid AI-looking patterns (e.g. unnecessary `.only(*CONST)`)
+- Do not over-index; unique constraints only when needed
+
+## Domain locks
+
+- TradingPartner ≠ ProviderBillingProfile
+- Claim links via `trip_id` only (patient/provider through trip)
+- Claim.status ≠ EDIFile.status
+- ClaimDocument ≠ AttachmentSubmission
+- Long-distance thresholds from `LongDistanceRule` DB, not hard-coded forever
+- 837P EDI path separate from attachment channel
+
+## Next
+
+Continue from **Next to build** in `docs/HANDOFF.md`.
