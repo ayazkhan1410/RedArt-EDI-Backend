@@ -61,7 +61,7 @@ POSTGRES_HOST=127.0.0.1 POSTGRES_PORT=7001 POSTGRES_DB=edi POSTGRES_USER=edi POS
 | `apps.long_distance_rule` | DB rules STANDARD 52/25, DESIGNATED_RURAL 125/25 (seeded) |
 | `apps.claim` | Claim (trip_id only); **ClaimDocument**; **SubmissionBatch** / **BatchClaim**; create-from-trip + doc completeness / block batch add |
 | `apps.claim_service_line` | Billable lines (procedure / units / mileage / charge) |
-| `apps.edi` | **EDIControlNumber** (ISA13/GS06) + **EDIFile** (837P transport metadata; status ≠ Claim.status) |
+| `apps.edi` | **EDIControlNumber**, **EDIFile**, **SFTPCredentials**, **SFTPDirectory** (transport metadata; Claim.status ≠ EDIFile.status) |
 
 API mount: single include → `redartdigital/api_v1_urls.py` under `/api/v1/`.
 
@@ -79,6 +79,8 @@ Useful endpoints:
 - `/api/v1/claim-service-lines/`
 - `/api/v1/edi-control-numbers/` + `/allocate/`
 - `/api/v1/edi-files/` + `/from-batch/` + `/<id>/mark-uploaded/`
+- `/api/v1/sftp-credentials/`
+- `/api/v1/sftp-directories/`
 
 Patterns in place:
 

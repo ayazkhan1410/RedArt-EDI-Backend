@@ -24,8 +24,8 @@ from apps.claim.utils.service import (
     sync_claim_document_status,
 )
 from apps.claim_service_line.models import ClaimServiceLine
-from apps.edi.choices import EDIFileStatus
-from apps.edi.models import EDIControlNumber, EDIFile
+from apps.edi.choices import EDIFileStatus, SFTPAuthType, SFTPDirectoryPurpose
+from apps.edi.models import EDIControlNumber, EDIFile, SFTPCredentials, SFTPDirectory
 from apps.edi.utils.service import create_edi_file_for_batch, mark_edi_file_uploaded
 from apps.long_distance_rule.models import LongDistanceRule
 from apps.nemt_trip.models import NemtTrip
@@ -62,6 +62,7 @@ class Command(BaseCommand):
         docs = self._seed_documents(claims)
         batches, batch_claims = self._seed_batches(partners, claims)
         controls, edi_files = self._seed_edi(batches)
+        sftp_creds, sftp_dirs = self._seed_sftp(partners)
 
         self.stdout.write(self.style.SUCCESS("Demo seed complete:"))
         self.stdout.write(f"  TradingPartner:          {len(partners)}")
@@ -78,8 +79,14 @@ class Command(BaseCommand):
         self.stdout.write(f"  BatchClaim:              {len(batch_claims)}")
         self.stdout.write(f"  EDIControlNumber:        {len(controls)}")
         self.stdout.write(f"  EDIFile:                 {len(edi_files)}")
+        self.stdout.write(f"  SFTPCredentials:         {len(sftp_creds)}")
+        self.stdout.write(f"  SFTPDirectory:           {len(sftp_dirs)}")
 
     def _flush_demo(self):
+        SFTPDirectory.objects.filter(
+            credentials__name__startswith="DEMO-SFTP-"
+        ).delete()
+        SFTPCredentials.objects.filter(name__startswith="DEMO-SFTP-").delete()
         EDIFile.objects.filter(batch__batch_number__startswith="DEMO-").delete()
         EDIControlNumber.objects.filter(
             batch__batch_number__startswith="DEMO-"
@@ -460,3 +467,37 @@ class Command(BaseCommand):
             except ValueError:
                 continue
         return controls, files
+
+    def _seed_sftp(self, partners):
+        creds = []
+        dirs = []
+        for i in range(5):
+            name = f"DEMO-SFTP-{i + 1:02d}"
+            cred, _ = SFTPCredentials.objects.update_or_create(
+                name=name,
+                environment="TEST",
+                defaults={
+                    "trading_partner": partners[i % len(partners)],
+                    "host": f"mft-demo-{i + 1}.example.com",
+                    "port": 22,
+                    "username": f"demo_user_{i + 1}",
+                    "auth_type": SFTPAuthType.PASSWORD,
+                    "password": f"DEMO-ONLY-PASSWORD-{i + 1}",
+                    "timeout_seconds": 30,
+                    "notes": "Demo SFTP credentials — not real.",
+                    "is_active": True,
+                },
+            )
+            creds.append(cred)
+            directory, _ = SFTPDirectory.objects.update_or_create(
+                credentials=cred,
+                purpose=SFTPDirectoryPurpose.OUTBOUND_837P,
+                sending_path=f"/demo/outbound/837p/{i + 1}",
+                receiving_path=f"/demo/inbound/999/{i + 1}",
+                defaults={
+                    "name": f"DEMO outbound {i + 1}",
+                    "is_active": True,
+                },
+            )
+            dirs.append(directory)
+        return creds, dirs

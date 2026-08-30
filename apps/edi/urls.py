@@ -1,5 +1,11 @@
 from django.urls import path
 
+from apps.edi.sftp_views import (
+    SFTPCredentialsDetailAPIView,
+    SFTPCredentialsListCreateAPIView,
+    SFTPDirectoryDetailAPIView,
+    SFTPDirectoryListCreateAPIView,
+)
 from apps.edi.views import (
     EDIControlNumberAllocateAPIView,
     EDIControlNumberDetailAPIView,
@@ -45,5 +51,25 @@ urlpatterns = [
         "edi-files/<int:pk>/",
         EDIFileDetailAPIView.as_view(),
         name="edi-file-detail",
+    ),
+    path(
+        "sftp-credentials/",
+        SFTPCredentialsListCreateAPIView.as_view(),
+        name="sftp-credentials-list-create",
+    ),
+    path(
+        "sftp-credentials/<int:pk>/",
+        SFTPCredentialsDetailAPIView.as_view(),
+        name="sftp-credentials-detail",
+    ),
+    path(
+        "sftp-directories/",
+        SFTPDirectoryListCreateAPIView.as_view(),
+        name="sftp-directory-list-create",
+    ),
+    path(
+        "sftp-directories/<int:pk>/",
+        SFTPDirectoryDetailAPIView.as_view(),
+        name="sftp-directory-detail",
     ),
 ]

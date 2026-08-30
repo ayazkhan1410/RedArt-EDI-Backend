@@ -14,3 +14,17 @@ class EDIFileStatus(models.TextChoices):
     ACKNOWLEDGED = "ACKNOWLEDGED", "Acknowledged"
     FAILED = "FAILED", "Failed"
     ARCHIVED = "ARCHIVED", "Archived"
+
+
+class SFTPAuthType(models.TextChoices):
+    PASSWORD = "PASSWORD", "Password"
+    PRIVATE_KEY = "PRIVATE_KEY", "Private key"
+    PASSWORD_AND_KEY = "PASSWORD_AND_KEY", "Password and private key"
+
+
+class SFTPDirectoryPurpose(models.TextChoices):
+    OUTBOUND_837P = "OUTBOUND_837P", "Outbound 837P"
+    INBOUND_999 = "INBOUND_999", "Inbound 999"
+    INBOUND_277 = "INBOUND_277", "Inbound 277"
+    INBOUND_835 = "INBOUND_835", "Inbound 835"
+    GENERAL = "GENERAL", "General send/receive"

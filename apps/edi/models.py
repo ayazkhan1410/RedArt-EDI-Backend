@@ -1,7 +1,12 @@
 from django.db import models
 
 from apps.core.models import BaseModel
-from apps.edi.choices import EDIFileStatus, TransactionType
+from apps.edi.choices import (
+    EDIFileStatus,
+    SFTPAuthType,
+    SFTPDirectoryPurpose,
+    TransactionType,
+)
 from apps.trading_partner.choices import Environment
 
 
@@ -159,3 +164,127 @@ class EDIFile(BaseModel):
 
     def __str__(self):
         return self.filename or f"EDIFile {self.pk}"
+
+
+class SFTPCredentialsQuerySet(models.QuerySet):
+    def with_relations(self):
+        return self.select_related("trading_partner")
+
+
+class SFTPCredentials(BaseModel):
+    """
+    SFTP/MFT login used to push 837P and pull acknowledgements.
+    Secrets are write-only on APIs — never echo password/key material on GET.
+    """
+
+    name = models.CharField(max_length=255)
+    trading_partner = models.ForeignKey(
+        "trading_partner.TradingPartner",
+        on_delete=models.PROTECT,
+        related_name="sftp_credentials",
+        null=True,
+        blank=True,
+    )
+    environment = models.CharField(
+        max_length=20,
+        choices=Environment.choices,
+        default=Environment.TEST,
+    )
+    host = models.CharField(max_length=255)
+    port = models.PositiveIntegerField(default=22)
+    username = models.CharField(max_length=255)
+    auth_type = models.CharField(
+        max_length=32,
+        choices=SFTPAuthType.choices,
+        default=SFTPAuthType.PASSWORD,
+    )
+    password = models.CharField(max_length=255, null=True, blank=True)
+    private_key_pem = models.TextField(null=True, blank=True)
+    private_key_passphrase = models.CharField(max_length=255, null=True, blank=True)
+    host_fingerprint = models.CharField(
+        max_length=255,
+        null=True,
+        blank=True,
+        help_text="Optional expected host key fingerprint.",
+    )
+    timeout_seconds = models.PositiveIntegerField(default=30)
+    notes = models.CharField(max_length=500, null=True, blank=True)
+    is_active = models.BooleanField(default=True)
+
+    objects = SFTPCredentialsQuerySet.as_manager()
+
+    class Meta:
+        verbose_name = "SFTP Credentials"
+        verbose_name_plural = "SFTP Credentials"
+        ordering = ("-id",)
+        constraints = [
+            models.UniqueConstraint(
+                fields=["name", "environment"],
+                name="uniq_sftp_credentials_name_environment",
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=["environment", "is_active"],
+                name="sftp_cred_env_active_idx",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.name} ({self.environment})"
+
+
+class SFTPDirectoryQuerySet(models.QuerySet):
+    def with_relations(self):
+        return self.select_related(
+            "credentials",
+            "credentials__trading_partner",
+        )
+
+
+class SFTPDirectory(BaseModel):
+    """Remote folders for outbound claims and inbound acknowledgements."""
+
+    credentials = models.ForeignKey(
+        SFTPCredentials,
+        on_delete=models.PROTECT,
+        related_name="directories",
+    )
+    name = models.CharField(max_length=255, null=True, blank=True)
+    purpose = models.CharField(
+        max_length=32,
+        choices=SFTPDirectoryPurpose.choices,
+        default=SFTPDirectoryPurpose.GENERAL,
+    )
+    sending_path = models.CharField(
+        max_length=500,
+        help_text="Remote path for outbound uploads (837P).",
+    )
+    receiving_path = models.CharField(
+        max_length=500,
+        help_text="Remote path for inbound downloads (999/277/835).",
+    )
+    is_active = models.BooleanField(default=True)
+
+    objects = SFTPDirectoryQuerySet.as_manager()
+
+    class Meta:
+        verbose_name = "SFTP Directory"
+        verbose_name_plural = "SFTP Directories"
+        ordering = ("-id",)
+        constraints = [
+            models.UniqueConstraint(
+                fields=["credentials", "purpose", "sending_path", "receiving_path"],
+                condition=models.Q(is_active=True),
+                name="uniq_active_sftp_directory_paths",
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=["purpose", "is_active"],
+                name="sftp_dir_purpose_active_idx",
+            ),
+        ]
+
+    def __str__(self):
+        return self.name or f"{self.purpose} #{self.pk}"
