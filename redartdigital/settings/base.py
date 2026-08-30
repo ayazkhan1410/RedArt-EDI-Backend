@@ -43,6 +43,8 @@ INSTALLED_APPS = [
     "apps.core",
     "apps.trading_partner",
     "apps.provider_billing_profile",
+    "apps.patient",
+    "apps.nemt_trip",
 ]
 
 MIDDLEWARE = [
@@ -157,6 +159,14 @@ SPECTACULAR_SETTINGS = {
         {
             "name": "provider_billing_profile",
             "description": "Provider billing profile CRUD (NPI / Medicaid billing identity).",
+        },
+        {
+            "name": "patient",
+            "description": "Patient / Medicaid member CRUD (county drives long-distance rules).",
+        },
+        {
+            "name": "nemt_trip",
+            "description": "NEMT trip CRUD and long-distance rule preview.",
         },
     ],
 }
