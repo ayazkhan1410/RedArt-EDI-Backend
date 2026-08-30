@@ -29,3 +29,24 @@ class AttachmentStatus(models.TextChoices):
     SUBMITTED = "SUBMITTED", "Submitted"
     CONFIRMED = "CONFIRMED", "Confirmed"
     FAILED = "FAILED", "Failed"
+
+
+class DocumentType(models.TextChoices):
+    STANDARD_TRIP_LOG = "STANDARD_TRIP_LOG", "Standard trip log"
+    MILE_25_VERIFICATION = "MILE_25_VERIFICATION", "25+ mile verification"
+    OTHER = "OTHER", "Other"
+
+
+class DocumentStatus(models.TextChoices):
+    MISSING = "MISSING", "Missing"
+    PENDING = "PENDING", "Pending"
+    COMPLETE = "COMPLETE", "Complete"
+
+
+class BatchStatus(models.TextChoices):
+    DRAFT = "DRAFT", "Draft"
+    READY = "READY", "Ready"
+    GENERATED = "GENERATED", "837P generated"
+    SUBMITTED = "SUBMITTED", "Submitted"
+    ACKNOWLEDGED = "ACKNOWLEDGED", "Acknowledged"
+    FAILED = "FAILED", "Failed"

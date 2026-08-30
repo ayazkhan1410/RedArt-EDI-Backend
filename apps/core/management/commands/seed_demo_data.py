@@ -15,9 +15,13 @@ from decimal import Decimal
 from django.core.management.base import BaseCommand
 from django.db import transaction
 
-from apps.claim.choices import ClaimStatus
-from apps.claim.models import Claim
-from apps.claim.utils.service import apply_long_distance_flags
+from apps.claim.choices import BatchStatus, ClaimStatus, DocumentStatus, DocumentType
+from apps.claim.models import BatchClaim, Claim, ClaimDocument, SubmissionBatch
+from apps.claim.utils.service import (
+    add_claim_to_batch,
+    apply_long_distance_flags,
+    sync_claim_document_status,
+)
 from apps.claim_service_line.models import ClaimServiceLine
 from apps.long_distance_rule.models import LongDistanceRule
 from apps.nemt_trip.models import NemtTrip
@@ -51,6 +55,8 @@ class Command(BaseCommand):
         trips = self._seed_trips(patients, providers)
         claims = self._seed_claims(trips)
         lines = self._seed_service_lines(claims)
+        docs = self._seed_documents(claims)
+        batches, batch_claims = self._seed_batches(partners, claims)
 
         self.stdout.write(self.style.SUCCESS("Demo seed complete:"))
         self.stdout.write(f"  TradingPartner:          {len(partners)}")
@@ -62,8 +68,18 @@ class Command(BaseCommand):
         )
         self.stdout.write(f"  Claim:                   {len(claims)}")
         self.stdout.write(f"  ClaimServiceLine:        {len(lines)}")
+        self.stdout.write(f"  ClaimDocument:           {len(docs)}")
+        self.stdout.write(f"  SubmissionBatch:         {len(batches)}")
+        self.stdout.write(f"  BatchClaim:              {len(batch_claims)}")
 
     def _flush_demo(self):
+        BatchClaim.objects.filter(
+            batch__batch_number__startswith="DEMO-"
+        ).delete()
+        SubmissionBatch.objects.filter(batch_number__startswith="DEMO-").delete()
+        ClaimDocument.objects.filter(
+            claim__claim_number__startswith="DEMO-"
+        ).delete()
         ClaimServiceLine.objects.filter(
             claim__claim_number__startswith="DEMO-"
         ).delete()
@@ -286,3 +302,113 @@ class Command(BaseCommand):
                 )
                 lines.append(extra)
         return lines
+
+    def _seed_documents(self, claims):
+        docs = []
+        for claim in claims:
+            if not claim.attachment_required:
+                continue
+            for doc_type, suffix, digest in (
+                (DocumentType.STANDARD_TRIP_LOG, "trip_log", "HASH-TRIP"),
+                (DocumentType.MILE_25_VERIFICATION, "verification", "HASH-25"),
+            ):
+                obj, _ = ClaimDocument.objects.update_or_create(
+                    claim=claim,
+                    document_type=doc_type,
+                    defaults={
+                        "file_name": f"{suffix}_{claim.claim_number}.pdf",
+                        "document_hash": f"{digest}-{claim.claim_number}",
+                        "is_signed": True,
+                        "status": DocumentStatus.COMPLETE,
+                        "is_active": True,
+                    },
+                )
+                docs.append(obj)
+            sync_claim_document_status(claim)
+        # Ensure at least 5 document rows: add OTHER docs on non-LD claims if needed
+        if len(docs) < 5:
+            for claim in claims:
+                if len(docs) >= 5:
+                    break
+                if claim.attachment_required:
+                    continue
+                obj, _ = ClaimDocument.objects.update_or_create(
+                    claim=claim,
+                    document_type=DocumentType.OTHER,
+                    defaults={
+                        "file_name": f"note_{claim.claim_number}.pdf",
+                        "document_hash": f"HASH-OTHER-{claim.claim_number}",
+                        "is_signed": True,
+                        "status": DocumentStatus.COMPLETE,
+                        "is_active": True,
+                    },
+                )
+                docs.append(obj)
+        return docs
+
+    def _seed_batches(self, partners, claims):
+        batches = []
+        batch_claims = []
+        ready_claims = [
+            c
+            for c in claims
+            if Claim.objects.filter(
+                pk=c.pk, status=ClaimStatus.READY_FOR_837P, is_active=True
+            ).exists()
+        ]
+        for i in range(5):
+            batch_number = f"DEMO-RB-2026-{10048 + i}"
+            batch, _ = SubmissionBatch.objects.update_or_create(
+                batch_number=batch_number,
+                defaults={
+                    "trading_partner": partners[i % len(partners)],
+                    "environment": "TEST",
+                    "status": BatchStatus.READY,
+                    "is_active": True,
+                    "claim_count": 0,
+                    "total_amount": Decimal("0.00"),
+                },
+            )
+            batches.append(batch)
+
+        # Put first ready claim into first batch (Ali-style demo)
+        if ready_claims:
+            claim = ready_claims[0]
+            existing = BatchClaim.objects.filter(
+                batch=batches[0], claim=claim
+            ).first()
+            if existing is None:
+                try:
+                    row = add_claim_to_batch(
+                        batch_id=batches[0].id,
+                        claim_id=claim.id,
+                        st02="0001",
+                    )
+                    batch_claims.append(row)
+                except ValueError:
+                    pass
+            else:
+                batch_claims.append(existing)
+
+        # Fill remaining batch_claims with other ready claims across batches
+        idx = 1
+        for claim in ready_claims[1:]:
+            if idx >= len(batches):
+                break
+            batch = batches[idx]
+            if BatchClaim.objects.filter(batch=batch, claim=claim).exists():
+                batch_claims.append(
+                    BatchClaim.objects.get(batch=batch, claim=claim)
+                )
+            else:
+                try:
+                    row = add_claim_to_batch(
+                        batch_id=batch.id,
+                        claim_id=claim.id,
+                    )
+                    batch_claims.append(row)
+                except ValueError:
+                    pass
+            idx += 1
+
+        return batches, batch_claims

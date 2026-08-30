@@ -7,13 +7,14 @@ from rest_framework import status
 from rest_framework.test import APITestCase
 
 from apps.claim.choices import AttachmentStatus, ClaimStatus
-from apps.claim.models import Claim
+from apps.claim.models import BatchClaim, Claim
 from apps.claim.utils.service import create_claim_from_trip
 from apps.claim_service_line.models import ClaimServiceLine
 from apps.long_distance_rule.models import LongDistanceRule
 from apps.nemt_trip.models import NemtTrip
 from apps.patient.models import Patient
 from apps.provider_billing_profile.models import ProviderBillingProfile
+from apps.trading_partner.models import TradingPartner
 
 
 class ClaimFixturesMixin:
@@ -163,3 +164,115 @@ class ClaimAPITests(ClaimFixturesMixin, APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         claim.refresh_from_db()
         self.assertFalse(claim.is_active)
+
+
+class ClaimDocumentAndBatchTests(ClaimFixturesMixin, APITestCase):
+    def setUp(self):
+        super().setUp()
+        self.claim, _ = create_claim_from_trip(
+            trip_id=self.trip.id,
+            claim_number="C001",
+            external_id="TRIP-1001",
+            create_service_line=False,
+        )
+        self.partner = TradingPartner.objects.create(
+            name="Colorado Medicaid",
+            sender_id="TP123456",
+            receiver_id="COMEDASSISTPROG",
+            environment="TEST",
+        )
+
+    def _create_doc(self, document_type, file_name, document_hash):
+        url = reverse("claim-document-list-create")
+        return self.client.post(
+            url,
+            {
+                "claim": self.claim.id,
+                "document_type": document_type,
+                "file_name": file_name,
+                "document_hash": document_hash,
+                "is_signed": True,
+                "status": "COMPLETE",
+            },
+            format="json",
+        )
+
+    def test_missing_docs_block_batch_and_keep_documents_required(self):
+        self.assertEqual(self.claim.status, ClaimStatus.DOCUMENTS_REQUIRED)
+
+        batch_url = reverse("submission-batch-list-create")
+        batch = self.client.post(
+            batch_url,
+            {
+                "batch_number": "RB-2026-10048",
+                "trading_partner": self.partner.id,
+                "environment": "TEST",
+                "status": "READY",
+            },
+            format="json",
+        )
+        self.assertEqual(batch.status_code, status.HTTP_201_CREATED)
+        batch_id = batch.data["data"]["id"]
+
+        add_url = reverse(
+            "submission-batch-add-claim", kwargs={"pk": batch_id}
+        )
+        blocked = self.client.post(
+            add_url, {"claim_id": self.claim.id, "st02": "0001"}, format="json"
+        )
+        self.assertEqual(blocked.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("blocked", blocked.data["message"].lower())
+
+    def test_complete_docs_ready_for_837p_and_batch(self):
+        trip_log = self._create_doc(
+            "STANDARD_TRIP_LOG", "trip_log_C001.pdf", "HASH111"
+        )
+        self.assertEqual(trip_log.status_code, status.HTTP_201_CREATED)
+
+        self.claim.refresh_from_db()
+        self.assertEqual(self.claim.status, ClaimStatus.DOCUMENTS_REQUIRED)
+
+        verification = self._create_doc(
+            "MILE_25_VERIFICATION", "verification_C001.pdf", "HASH222"
+        )
+        self.assertEqual(verification.status_code, status.HTTP_201_CREATED)
+
+        self.claim.refresh_from_db()
+        self.assertEqual(self.claim.status, ClaimStatus.READY_FOR_837P)
+
+        status_url = reverse(
+            "claim-document-status", kwargs={"pk": self.claim.id}
+        )
+        status_resp = self.client.get(status_url)
+        self.assertEqual(status_resp.status_code, status.HTTP_200_OK)
+        self.assertTrue(status_resp.data["data"]["can_submit"])
+
+        batch = self.client.post(
+            reverse("submission-batch-list-create"),
+            {
+                "batch_number": "RB-2026-10048",
+                "trading_partner": self.partner.id,
+                "environment": "TEST",
+                "status": "READY",
+            },
+            format="json",
+        )
+        batch_id = batch.data["data"]["id"]
+        added = self.client.post(
+            reverse("submission-batch-add-claim", kwargs={"pk": batch_id}),
+            {"claim_id": self.claim.id, "st02": "0001"},
+            format="json",
+        )
+        self.assertEqual(added.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(added.data["data"]["st02"], "0001")
+
+        batch_detail = self.client.get(
+            reverse("submission-batch-detail", kwargs={"pk": batch_id})
+        )
+        self.assertEqual(batch_detail.status_code, status.HTTP_200_OK)
+        self.assertEqual(batch_detail.data["data"]["claim_count"], 1)
+        self.assertEqual(
+            str(batch_detail.data["data"]["total_amount"]),
+            "150.00",
+        )
+        self.assertEqual(BatchClaim.objects.filter(batch_id=batch_id).count(), 1)

@@ -53,13 +53,13 @@ POSTGRES_HOST=127.0.0.1 POSTGRES_PORT=7001 POSTGRES_DB=edi POSTGRES_USER=edi POS
 
 | App | Purpose |
 |-----|---------|
-| `apps.core` | `BaseModel`, `StandardPagination`, `utils.responses` |
+| `apps.core` | `BaseModel`, `StandardPagination`, `utils.responses`, `seed_demo_data` |
 | `apps.trading_partner` | EDI submitter (sender_id / receiver_id / environment) |
 | `apps.provider_billing_profile` | Billing NPI identity (+ location_id, revalidation_date, address…) |
 | `apps.patient` | Member; **`county`** drives 52 vs 125 |
 | `apps.nemt_trip` | Ride; FKs patient + provider; long-distance-check API |
 | `apps.long_distance_rule` | DB rules STANDARD 52/25, DESIGNATED_RURAL 125/25 (seeded) |
-| `apps.claim` | Claim (trip_id only); create-from-trip applies long-distance flags |
+| `apps.claim` | Claim (trip_id only); **ClaimDocument**; **SubmissionBatch** / **BatchClaim**; create-from-trip + doc completeness / block batch add |
 | `apps.claim_service_line` | Billable lines (procedure / units / mileage / charge) |
 
 API mount: single include → `redartdigital/api_v1_urls.py` under `/api/v1/`.
@@ -71,7 +71,10 @@ Useful endpoints:
 - `/api/v1/patients/`
 - `/api/v1/nemt-trips/` + `/api/v1/nemt-trips/<id>/long-distance-check/`
 - `/api/v1/long-distance-rules/`
-- `/api/v1/claims/` + `/api/v1/claims/from-trip/`
+- `/api/v1/claims/` + `/api/v1/claims/from-trip/` + `/api/v1/claims/<id>/document-status/`
+- `/api/v1/claim-documents/`
+- `/api/v1/submission-batches/` + `/api/v1/submission-batches/<id>/add-claim/`
+- `/api/v1/batch-claims/`
 - `/api/v1/claim-service-lines/`
 
 Patterns in place:
@@ -114,11 +117,10 @@ Do **not** re-decide `attachment_required` after 999 — set at rules stage and 
 ## Next to build
 
 1. Populate rural counties (or county table) so DESIGNATED_RURAL actually applies  
-2. ClaimDocument + AttachmentSubmission  
-3. Doc completeness + **block submit**  
-4. SubmissionBatch / BatchClaim / EDIFile / control numbers / 999  
-5. Validator + 837P generator APIs  
-6. Service auth for RedArt → EDI  
+2. AttachmentSubmission (separate channel tracking; ClaimDocument already exists)  
+3. EDIFile / control numbers / 999  
+4. Validator + 837P generator APIs  
+5. Service auth for RedArt → EDI  
 
 Build model-by-model: propose → approve → code → migrate when asked.
 

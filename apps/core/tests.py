@@ -2,7 +2,7 @@ from django.core.management import call_command
 from django.test import SimpleTestCase, TestCase
 from rest_framework.exceptions import ValidationError
 
-from apps.claim.models import Claim
+from apps.claim.models import BatchClaim, Claim, ClaimDocument, SubmissionBatch
 from apps.claim_service_line.models import ClaimServiceLine
 from apps.core.pagination import StandardPagination
 from apps.core.utils.responses import error_response, success_response
@@ -57,10 +57,19 @@ class SeedDemoDataTests(TestCase):
         )
         self.assertGreaterEqual(Claim.objects.count(), 5)
         self.assertGreaterEqual(ClaimServiceLine.objects.count(), 5)
+        self.assertGreaterEqual(ClaimDocument.objects.count(), 5)
+        self.assertGreaterEqual(SubmissionBatch.objects.count(), 5)
+        self.assertGreaterEqual(BatchClaim.objects.count(), 1)
 
         # Idempotent re-run should not explode / duplicate claim numbers
         call_command("seed_demo_data")
         self.assertEqual(
             Claim.objects.filter(claim_number__startswith="DEMO-").count(),
+            5,
+        )
+        self.assertEqual(
+            SubmissionBatch.objects.filter(
+                batch_number__startswith="DEMO-"
+            ).count(),
             5,
         )

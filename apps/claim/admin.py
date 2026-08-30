@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from apps.claim.models import Claim
+from apps.claim.models import BatchClaim, Claim, ClaimDocument, SubmissionBatch
 
 
 @admin.register(Claim)
@@ -67,3 +67,55 @@ class ClaimAdmin(admin.ModelAdmin):
         ),
         ("Timestamps", {"fields": ("created_at", "updated_at")}),
     )
+
+
+@admin.register(ClaimDocument)
+class ClaimDocumentAdmin(admin.ModelAdmin):
+    list_display = (
+        "id",
+        "claim",
+        "document_type",
+        "file_name",
+        "is_signed",
+        "status",
+        "is_active",
+        "created_at",
+    )
+    list_filter = ("document_type", "status", "is_signed", "is_active")
+    search_fields = ("file_name", "document_hash", "claim__claim_number")
+    autocomplete_fields = ("claim",)
+    readonly_fields = ("id", "created_at", "updated_at")
+
+
+@admin.register(SubmissionBatch)
+class SubmissionBatchAdmin(admin.ModelAdmin):
+    list_display = (
+        "id",
+        "batch_number",
+        "trading_partner",
+        "environment",
+        "claim_count",
+        "total_amount",
+        "status",
+        "is_active",
+        "created_at",
+    )
+    list_filter = ("status", "environment", "is_active")
+    search_fields = ("batch_number", "trading_partner__name")
+    autocomplete_fields = ("trading_partner",)
+    readonly_fields = (
+        "id",
+        "claim_count",
+        "total_amount",
+        "created_at",
+        "updated_at",
+    )
+
+
+@admin.register(BatchClaim)
+class BatchClaimAdmin(admin.ModelAdmin):
+    list_display = ("id", "batch", "claim", "st02", "is_active", "created_at")
+    list_filter = ("is_active",)
+    search_fields = ("st02", "batch__batch_number", "claim__claim_number")
+    autocomplete_fields = ("batch", "claim")
+    readonly_fields = ("id", "created_at", "updated_at")
