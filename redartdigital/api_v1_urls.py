@@ -8,4 +8,5 @@ urlpatterns = [
     path("", include("apps.long_distance_rule.urls")),
     path("", include("apps.claim.urls")),
     path("", include("apps.claim_service_line.urls")),
+    path("", include("apps.edi.urls")),
 ]

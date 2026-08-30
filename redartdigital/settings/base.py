@@ -48,6 +48,7 @@ INSTALLED_APPS = [
     "apps.long_distance_rule",
     "apps.claim",
     "apps.claim_service_line",
+    "apps.edi",
 ]
 
 MIDDLEWARE = [

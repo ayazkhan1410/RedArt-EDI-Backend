@@ -20,9 +20,13 @@ from apps.claim.models import BatchClaim, Claim, ClaimDocument, SubmissionBatch
 from apps.claim.utils.service import (
     add_claim_to_batch,
     apply_long_distance_flags,
+    refresh_batch_totals,
     sync_claim_document_status,
 )
 from apps.claim_service_line.models import ClaimServiceLine
+from apps.edi.choices import EDIFileStatus
+from apps.edi.models import EDIControlNumber, EDIFile
+from apps.edi.utils.service import create_edi_file_for_batch, mark_edi_file_uploaded
 from apps.long_distance_rule.models import LongDistanceRule
 from apps.nemt_trip.models import NemtTrip
 from apps.patient.models import Patient
@@ -57,6 +61,7 @@ class Command(BaseCommand):
         lines = self._seed_service_lines(claims)
         docs = self._seed_documents(claims)
         batches, batch_claims = self._seed_batches(partners, claims)
+        controls, edi_files = self._seed_edi(batches)
 
         self.stdout.write(self.style.SUCCESS("Demo seed complete:"))
         self.stdout.write(f"  TradingPartner:          {len(partners)}")
@@ -71,8 +76,14 @@ class Command(BaseCommand):
         self.stdout.write(f"  ClaimDocument:           {len(docs)}")
         self.stdout.write(f"  SubmissionBatch:         {len(batches)}")
         self.stdout.write(f"  BatchClaim:              {len(batch_claims)}")
+        self.stdout.write(f"  EDIControlNumber:        {len(controls)}")
+        self.stdout.write(f"  EDIFile:                 {len(edi_files)}")
 
     def _flush_demo(self):
+        EDIFile.objects.filter(batch__batch_number__startswith="DEMO-").delete()
+        EDIControlNumber.objects.filter(
+            batch__batch_number__startswith="DEMO-"
+        ).delete()
         BatchClaim.objects.filter(
             batch__batch_number__startswith="DEMO-"
         ).delete()
@@ -365,8 +376,6 @@ class Command(BaseCommand):
                     "environment": "TEST",
                     "status": BatchStatus.READY,
                     "is_active": True,
-                    "claim_count": 0,
-                    "total_amount": Decimal("0.00"),
                 },
             )
             batches.append(batch)
@@ -411,4 +420,43 @@ class Command(BaseCommand):
                     pass
             idx += 1
 
+        for batch in batches:
+            refresh_batch_totals(batch)
+
         return batches, batch_claims
+
+    def _seed_edi(self, batches):
+        controls = []
+        files = []
+        for i, batch in enumerate(batches):
+            batch.refresh_from_db()
+            if batch.claim_count < 1:
+                continue
+
+            existing_file = EDIFile.objects.filter(
+                batch=batch, is_active=True
+            ).first()
+            if existing_file is not None:
+                files.append(existing_file)
+                if existing_file.control_number_id:
+                    controls.append(existing_file.control_number)
+                continue
+
+            try:
+                edi = create_edi_file_for_batch(
+                    batch_id=batch.id,
+                    file_hash=f"DEMO-FILEHASH-{i + 1:03d}",
+                    path_or_blob_ref=f"s3://edi/demo/{batch.batch_number}.txt",
+                    status=EDIFileStatus.GENERATED,
+                )
+                edi = mark_edi_file_uploaded(
+                    edi.id,
+                    path_or_blob_ref=edi.path_or_blob_ref,
+                    file_hash=edi.file_hash,
+                )
+                files.append(edi)
+                if edi.control_number_id:
+                    controls.append(edi.control_number)
+            except ValueError:
+                continue
+        return controls, files

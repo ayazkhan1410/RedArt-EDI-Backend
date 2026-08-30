@@ -61,6 +61,7 @@ POSTGRES_HOST=127.0.0.1 POSTGRES_PORT=7001 POSTGRES_DB=edi POSTGRES_USER=edi POS
 | `apps.long_distance_rule` | DB rules STANDARD 52/25, DESIGNATED_RURAL 125/25 (seeded) |
 | `apps.claim` | Claim (trip_id only); **ClaimDocument**; **SubmissionBatch** / **BatchClaim**; create-from-trip + doc completeness / block batch add |
 | `apps.claim_service_line` | Billable lines (procedure / units / mileage / charge) |
+| `apps.edi` | **EDIControlNumber** (ISA13/GS06) + **EDIFile** (837P transport metadata; status ≠ Claim.status) |
 
 API mount: single include → `redartdigital/api_v1_urls.py` under `/api/v1/`.
 
@@ -76,6 +77,8 @@ Useful endpoints:
 - `/api/v1/submission-batches/` + `/api/v1/submission-batches/<id>/add-claim/`
 - `/api/v1/batch-claims/`
 - `/api/v1/claim-service-lines/`
+- `/api/v1/edi-control-numbers/` + `/allocate/`
+- `/api/v1/edi-files/` + `/from-batch/` + `/<id>/mark-uploaded/`
 
 Patterns in place:
 
@@ -95,10 +98,10 @@ Patterns in place:
 **ClaimDocument** = files; **AttachmentSubmission** = transmission channel/reference.  
 **LongDistanceRule** in DB (done). Rural county list still empty in `DESIGNATED_RURAL_COUNTIES` — until filled, everyone is STANDARD.
 
-Planned entities still to build: ClaimDocument, AttachmentSubmission, SubmissionBatch, BatchClaim, EDIFile, EDIControlNumber, EDIAcknowledgement.
+Planned entities still to build: AttachmentSubmission, EDIAcknowledgement (999).
 
 Claim flags when coding: `attachment_required`, `attachment_route`, `attachment_status`, `external_id`, diagnosis, POS, etc.  
-EDIFile: `status`, `uploaded_at`, `path`/`blob_ref`. BatchClaim: `st02`. EDIControlNumber: `environment`. EDIAcknowledgement: `affected_st02`, `raw_file_ref`.
+EDIFile: `status`, `uploaded_at`, `path`/`blob_ref` (done). BatchClaim: `st02` (done). EDIControlNumber: `environment` (done). EDIAcknowledgement: `affected_st02`, `raw_file_ref`.
 
 ---
 
@@ -118,8 +121,8 @@ Do **not** re-decide `attachment_required` after 999 — set at rules stage and 
 
 1. Populate rural counties (or county table) so DESIGNATED_RURAL actually applies  
 2. AttachmentSubmission (separate channel tracking; ClaimDocument already exists)  
-3. EDIFile / control numbers / 999  
-4. Validator + 837P generator APIs  
+3. EDIAcknowledgement (999 parsing / store)  
+4. Validator + 837P **payload** generator (EDIFile metadata exists; X12 body not yet)  
 5. Service auth for RedArt → EDI  
 
 Build model-by-model: propose → approve → code → migrate when asked.

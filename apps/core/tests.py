@@ -6,6 +6,7 @@ from apps.claim.models import BatchClaim, Claim, ClaimDocument, SubmissionBatch
 from apps.claim_service_line.models import ClaimServiceLine
 from apps.core.pagination import StandardPagination
 from apps.core.utils.responses import error_response, success_response
+from apps.edi.models import EDIControlNumber, EDIFile
 from apps.long_distance_rule.models import LongDistanceRule
 from apps.nemt_trip.models import NemtTrip
 from apps.patient.models import Patient
@@ -60,6 +61,8 @@ class SeedDemoDataTests(TestCase):
         self.assertGreaterEqual(ClaimDocument.objects.count(), 5)
         self.assertGreaterEqual(SubmissionBatch.objects.count(), 5)
         self.assertGreaterEqual(BatchClaim.objects.count(), 1)
+        self.assertGreaterEqual(EDIControlNumber.objects.count(), 1)
+        self.assertGreaterEqual(EDIFile.objects.count(), 1)
 
         # Idempotent re-run should not explode / duplicate claim numbers
         call_command("seed_demo_data")
