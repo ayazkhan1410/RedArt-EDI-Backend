@@ -5,4 +5,5 @@ urlpatterns = [
     path("", include("apps.provider_billing_profile.urls")),
     path("", include("apps.patient.urls")),
     path("", include("apps.nemt_trip.urls")),
+    path("", include("apps.long_distance_rule.urls")),
 ]

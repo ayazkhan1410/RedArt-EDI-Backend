@@ -45,6 +45,7 @@ INSTALLED_APPS = [
     "apps.provider_billing_profile",
     "apps.patient",
     "apps.nemt_trip",
+    "apps.long_distance_rule",
 ]
 
 MIDDLEWARE = [
@@ -167,6 +168,10 @@ SPECTACULAR_SETTINGS = {
         {
             "name": "nemt_trip",
             "description": "NEMT trip CRUD and long-distance rule preview.",
+        },
+        {
+            "name": "long_distance_rule",
+            "description": "Configurable 52/125 and 25+ mile thresholds by county type.",
         },
     ],
 }
