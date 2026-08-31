@@ -363,3 +363,30 @@ def apply_edi_acknowledgement(
             batch.save(update_fields=["status", "updated_at"])
 
     return ack, updated_claim_ids
+
+
+@transaction.atomic
+def import_999_acknowledgement(
+    *,
+    content,
+    batch_id,
+    edi_file_id=None,
+    raw_file_ref=None,
+    apply_claim_status=True,
+):
+    """
+    Parse raw 999 X12, map to EDIAcknowledgement fields, and apply side effects.
+    """
+    from apps.edi.utils.x12 import parse_999
+
+    parsed = parse_999(content)
+    return apply_edi_acknowledgement(
+        batch_id=batch_id,
+        ack_type=parsed["ack_type"],
+        status=parsed["status"],
+        affected_st02=parsed.get("affected_st02"),
+        raw_file_ref=raw_file_ref,
+        edi_file_id=edi_file_id,
+        message=parsed.get("message"),
+        apply_claim_status=apply_claim_status,
+    ), parsed

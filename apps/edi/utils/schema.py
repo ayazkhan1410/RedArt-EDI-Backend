@@ -107,7 +107,7 @@ def build_edi_content(payload):
                 "BHT",
                 "0019",
                 "00",
-                claim["claim_number"],
+                st02,
                 gs_date,
                 gs_time,
                 "CH",
@@ -130,9 +130,20 @@ def build_edi_content(payload):
                 sender,
             )
         )
-        phone = patient.get("phone") or provider.get("phone") or "0000000000"
+        contact_name = (
+            partner.get("contact_name")
+            or partner.get("name")
+            or "SUBMITTER"
+        )
+        phone = (
+            partner.get("contact_phone")
+            or patient.get("phone")
+            or provider.get("phone")
+            or "0000000000"
+        )
+        phone = "".join(ch for ch in str(phone) if ch.isdigit()) or "0000000000"
         edi_content.append(
-            _seg(envelope, "PER", "IC", partner.get("name") or "SUBMITTER", "TE", phone)
+            _seg(envelope, "PER", "IC", contact_name, "TE", phone)
         )
 
         # 1000B Receiver (Colorado)
@@ -152,13 +163,9 @@ def build_edi_content(payload):
             )
         )
 
-        # 2000A Billing provider HL (+ PRV specialty before 2010AA)
+        # 2000A Billing provider HL → 2010AA (client-approved sample has no PRV)
         billing_hl = 1
         edi_content.append(_seg(envelope, "HL", str(billing_hl), "", "20", "1"))
-        if provider.get("taxonomy_code"):
-            edi_content.append(
-                _seg(envelope, "PRV", "BI", "PXC", provider["taxonomy_code"])
-            )
 
         # 2010AA Billing Provider Name
         edi_content.append(
@@ -270,6 +277,22 @@ def build_edi_content(payload):
         if claim.get("diagnosis_code"):
             diag = str(claim["diagnosis_code"]).replace(".", "")
             edi_content.append(_seg(envelope, "HI", f"ABK{cp}{diag}"))
+
+        # Client-approved sample: NM1*DN (driver) after HI, before 2400 lines.
+        driver = claim.get("driver") or {}
+        driver_last = (driver.get("last_name") or "").strip()
+        driver_first = (driver.get("first_name") or "").strip()
+        if driver_last or driver_first:
+            edi_content.append(
+                _seg(
+                    envelope,
+                    "NM1",
+                    "DN",
+                    "1",
+                    driver_last,
+                    driver_first,
+                )
+            )
 
         for idx, line in enumerate(claim.get("service_lines") or [], start=1):
             edi_content.append(_seg(envelope, "LX", str(idx)))

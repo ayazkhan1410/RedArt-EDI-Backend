@@ -24,8 +24,9 @@ from apps.edi.serializers import (
     EDIAcknowledgementIdSerializer,
     EDIAcknowledgementListSerializer,
     EDIAcknowledgementSerializer,
+    Import999AcknowledgementSerializer,
 )
-from apps.edi.utils.service import apply_edi_acknowledgement
+from apps.edi.utils.service import apply_edi_acknowledgement, import_999_acknowledgement
 from apps.edi.utils.validators import clean_optional_text
 
 logger = logging.getLogger(__name__)
@@ -54,6 +55,30 @@ APPLY_EXAMPLE = OpenApiExample(
         "affected_st02": "0001",
         "raw_file_ref": "s3://edi/999_001.edi",
         "apply_claim_status": True,
+    },
+    request_only=True,
+)
+
+IMPORT_999_EXAMPLE = OpenApiExample(
+    "Import raw 999 X12",
+    value={
+        "batch_id": 1,
+        "edi_file_id": 1,
+        "raw_file_ref": "s3://edi/999_001.edi",
+        "apply_claim_status": True,
+        "content": (
+            "ISA*00*          *00*          *ZZ*COMEDASSISTPROG*ZZ*89513013       "
+            "*260817*1947*^*00501*000000001*0*T*:~"
+            "GS*FA*COMEDASSISTPROG*89513013*20260817*1947*1*X*005010X231A1~"
+            "ST*999*0001*005010X231A1~"
+            "AK1*HC*1*005010X222A1~"
+            "AK2*837*0001*005010X222A1~"
+            "IK5*A~"
+            "AK9*A*1*1*1~"
+            "SE*6*0001~"
+            "GE*1*1~"
+            "IEA*1*000000001~"
+        ),
     },
     request_only=True,
 )
@@ -367,5 +392,60 @@ class EDIAcknowledgementApplyAPIView(APIView):
             logger.error("Apply EDI acknowledgement failed:\n%s", traceback.format_exc())
             return error_response(
                 "Unable to apply EDI acknowledgement.",
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+
+class EDIAcknowledgementImport999APIView(APIView):
+    """Parse raw 999 X12 content and persist EDIAcknowledgement."""
+
+    @extend_schema(
+        tags=[TAG],
+        request=Import999AcknowledgementSerializer,
+        examples=[IMPORT_999_EXAMPLE],
+        responses={201: EDIAcknowledgementIdSerializer},
+    )
+    def post(self, request):
+        try:
+            serializer = Import999AcknowledgementSerializer(data=request.data)
+            if not serializer.is_valid():
+                return error_response("Validation failed.", errors=serializer.errors)
+            data = serializer.validated_data
+            (ack, claim_ids), parsed = import_999_acknowledgement(
+                content=data["content"],
+                batch_id=data["batch_id"],
+                edi_file_id=data.get("edi_file_id"),
+                raw_file_ref=data.get("raw_file_ref"),
+                apply_claim_status=data.get("apply_claim_status", True),
+            )
+            return success_response(
+                "999 acknowledgement imported successfully.",
+                data={
+                    "id": ack.id,
+                    "status": ack.status,
+                    "affected_st02": ack.affected_st02,
+                    "updated_claim_ids": claim_ids,
+                    "parsed": {
+                        "ack_type": parsed.get("ack_type"),
+                        "status": parsed.get("status"),
+                        "affected_st02": parsed.get("affected_st02"),
+                        "ik5_code": parsed.get("ik5_code"),
+                        "ak9_code": parsed.get("ak9_code"),
+                        "ak1": parsed.get("ak1"),
+                        "ak2": parsed.get("ak2"),
+                        "message": parsed.get("message"),
+                        "segments": parsed.get("segments"),
+                    },
+                },
+                status_code=status.HTTP_201_CREATED,
+            )
+        except ValueError as exc:
+            return error_response(str(exc), status_code=status.HTTP_400_BAD_REQUEST)
+        except Exception:
+            logger.error(
+                "Import 999 acknowledgement failed:\n%s", traceback.format_exc()
+            )
+            return error_response(
+                "Unable to import 999 acknowledgement.",
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )

@@ -1,29 +1,22 @@
 """
-Seed realistic demo rows for local/Docker development.
+Seed data matching the client-approved 837P sample (RedArt / CO Medicaid).
 
 Usage:
-  python manage.py seed_demo_data
-  python manage.py seed_demo_data --flush-demo
+  python manage.py seed_demo_data --flush-all
+  python manage.py seed_demo_data --flush-demo   # legacy DEMO-* keys only
 
-LongDistanceRule only has two county_type values (unique) — seeds those two.
-All other models get at least 5 demo rows (idempotent via known keys).
+After --flush-all, generate-837p for batch REDART-SAMPLE-837P should emit
+the same segment shape as the approved file (dates/control #s will differ).
 """
 
-from datetime import date, timedelta
+from datetime import date
 from decimal import Decimal
 
 from django.conf import settings
 from django.core.management.base import BaseCommand
 from django.db import transaction
 
-from apps.claim.choices import (
-    AttachmentRoute,
-    AttachmentSubmissionStatus,
-    BatchStatus,
-    ClaimStatus,
-    DocumentStatus,
-    DocumentType,
-)
+from apps.claim.choices import BatchStatus, ClaimStatus
 from apps.claim.models import (
     AttachmentSubmission,
     BatchClaim,
@@ -31,32 +24,17 @@ from apps.claim.models import (
     ClaimDocument,
     SubmissionBatch,
 )
-from apps.claim.utils.service import (
-    add_claim_to_batch,
-    apply_long_distance_flags,
-    refresh_batch_totals,
-    sync_claim_document_status,
-    sync_claim_from_attachment_submission,
-)
+from apps.claim.utils.service import add_claim_to_batch, refresh_batch_totals
 from apps.claim_service_line.models import ClaimServiceLine
-from apps.edi.choices import (
-    AcknowledgementStatus,
-    AcknowledgementType,
-    EDIFileStatus,
-    SFTPAuthType,
-    SFTPDirectoryPurpose,
-)
+from apps.edi.choices import SFTPAuthType, SFTPDirectoryPurpose
 from apps.edi.models import (
+    EDI999Import,
     EDIAcknowledgement,
     EDIControlNumber,
     EDIFile,
+    EDIFileTransferLog,
     SFTPCredentials,
     SFTPDirectory,
-)
-from apps.edi.utils.service import (
-    apply_edi_acknowledgement,
-    create_edi_file_for_batch,
-    mark_edi_file_uploaded,
 )
 from apps.long_distance_rule.models import LongDistanceRule
 from apps.nemt_trip.models import NemtTrip
@@ -64,62 +42,89 @@ from apps.patient.models import Patient
 from apps.provider_billing_profile.models import ProviderBillingProfile
 from apps.trading_partner.models import TradingPartner
 
-DEMO_PROVIDER_NPIS = [f"17500{i:05d}" for i in range(1, 6)]
+SAMPLE_BATCH_NUMBER = "REDART-SAMPLE-837P"
+SAMPLE_CLAIM_NUMBER = "TESTCLAIM0001"
+SAMPLE_MEMBER_ID = "Y999999"
+SAMPLE_NPI = "9000211959"
+SAMPLE_SENDER = "89513013"
 
 
 class Command(BaseCommand):
-    help = "Seed at least 5 demo rows per domain model (2 for LongDistanceRule)."
+    help = (
+        "Wipe domain data (optional) and seed the client-approved RedArt 837P sample."
+    )
 
     def add_arguments(self, parser):
         parser.add_argument(
+            "--flush-all",
+            action="store_true",
+            help="Delete all rows from app domain models before seeding.",
+        )
+        parser.add_argument(
             "--flush-demo",
             action="store_true",
-            help="Delete previously seeded demo rows (keys starting with DEMO-) before insert.",
+            help="Delete legacy DEMO-* seeded rows before insert.",
         )
 
     @transaction.atomic
     def handle(self, *args, **options):
-        if options["flush_demo"]:
+        if options["flush_all"]:
+            self._flush_all()
+            self.stdout.write(self.style.WARNING("Flushed all domain model rows."))
+        elif options["flush_demo"]:
             self._flush_demo()
             self.stdout.write(self.style.WARNING("Flushed previous DEMO-* rows."))
 
         self._seed_long_distance_rules()
-        partners = self._seed_trading_partners()
-        providers = self._seed_providers()
-        patients = self._seed_patients()
-        trips = self._seed_trips(patients, providers)
-        claims = self._seed_claims(trips)
-        lines = self._seed_service_lines(claims)
-        docs = self._seed_documents(claims)
-        batches, batch_claims = self._seed_batches(partners, claims)
-        controls, edi_files = self._seed_edi(batches)
-        acks = self._seed_acknowledgements(batches, batch_claims, edi_files)
-        attachments = self._seed_attachment_submissions(claims)
-        sftp_creds, sftp_dirs = self._seed_sftp(partners)
-        env_cred, env_dirs = self._seed_sftp_from_env(partners)
-        if env_cred:
-            sftp_creds.append(env_cred)
-            sftp_dirs.extend(env_dirs)
+        partner = self._seed_trading_partner()
+        provider = self._seed_provider()
+        patient = self._seed_patient()
+        trip = self._seed_trip(patient, provider)
+        claim = self._seed_claim(trip)
+        lines = self._seed_service_lines(claim)
+        batch, batch_claim = self._seed_batch(partner, claim)
+        env_cred, env_dirs = self._seed_sftp_from_env([partner])
 
-        self.stdout.write(self.style.SUCCESS("Demo seed complete:"))
-        self.stdout.write(f"  TradingPartner:          {len(partners)}")
-        self.stdout.write(f"  ProviderBillingProfile:  {len(providers)}")
-        self.stdout.write(f"  Patient:                 {len(patients)}")
-        self.stdout.write(f"  NemtTrip:                {len(trips)}")
+        self.stdout.write(self.style.SUCCESS("Approved-sample seed complete:"))
+        self.stdout.write(f"  TradingPartner id={partner.id} sender={partner.sender_id}")
+        self.stdout.write(f"  Provider NPI={provider.npi}")
+        self.stdout.write(f"  Patient medicaid={patient.medicaid_member_id}")
+        self.stdout.write(f"  NemtTrip id={trip.id} DOS={trip.service_date}")
+        self.stdout.write(f"  Claim {claim.claim_number} total={claim.total_charge}")
+        self.stdout.write(f"  Service lines: {len(lines)}")
         self.stdout.write(
-            f"  LongDistanceRule:        {LongDistanceRule.objects.filter(is_active=True).count()} (unique county types)"
+            f"  Batch {batch.batch_number} id={batch.id} st02={batch_claim.st02}"
         )
-        self.stdout.write(f"  Claim:                   {len(claims)}")
-        self.stdout.write(f"  ClaimServiceLine:        {len(lines)}")
-        self.stdout.write(f"  ClaimDocument:           {len(docs)}")
-        self.stdout.write(f"  AttachmentSubmission:    {len(attachments)}")
-        self.stdout.write(f"  SubmissionBatch:         {len(batches)}")
-        self.stdout.write(f"  BatchClaim:              {len(batch_claims)}")
-        self.stdout.write(f"  EDIControlNumber:        {len(controls)}")
-        self.stdout.write(f"  EDIFile:                 {len(edi_files)}")
-        self.stdout.write(f"  EDIAcknowledgement:      {len(acks)}")
-        self.stdout.write(f"  SFTPCredentials:         {len(sftp_creds)}")
-        self.stdout.write(f"  SFTPDirectory:           {len(sftp_dirs)}")
+        if env_cred:
+            self.stdout.write(f"  SFTPCredentials: {env_cred.name} (+{len(env_dirs)} dirs)")
+        else:
+            self.stdout.write("  SFTP env seed skipped (set SFTP_SEED_*).")
+        self.stdout.write(
+            self.style.SUCCESS(
+                f"Next: POST /api/v1/edi-files/generate-837p/ with batch_id={batch.id}"
+            )
+        )
+
+    def _flush_all(self):
+        """Hard-delete all EDI / claim / trip domain rows (FK-safe order)."""
+        EDI999Import.objects.all().delete()
+        EDIFileTransferLog.objects.all().delete()
+        EDIAcknowledgement.objects.all().delete()
+        EDIFile.objects.all().delete()
+        EDIControlNumber.objects.all().delete()
+        BatchClaim.objects.all().delete()
+        SubmissionBatch.objects.all().delete()
+        AttachmentSubmission.objects.all().delete()
+        ClaimDocument.objects.all().delete()
+        ClaimServiceLine.objects.all().delete()
+        Claim.objects.all().delete()
+        NemtTrip.objects.all().delete()
+        Patient.objects.all().delete()
+        ProviderBillingProfile.objects.all().delete()
+        SFTPDirectory.objects.all().delete()
+        SFTPCredentials.objects.all().delete()
+        TradingPartner.objects.all().delete()
+        LongDistanceRule.objects.all().delete()
 
     def _flush_demo(self):
         SFTPDirectory.objects.filter(
@@ -129,8 +134,14 @@ class Command(BaseCommand):
         seed_name = getattr(settings, "SFTP_SEED_NAME", "SEED-SFTP-CLOUD")
         SFTPDirectory.objects.filter(credentials__name=seed_name).delete()
         SFTPCredentials.objects.filter(name=seed_name).delete()
+        EDI999Import.objects.filter(
+            batch__batch_number__startswith="DEMO-"
+        ).delete()
         EDIAcknowledgement.objects.filter(
             batch__batch_number__startswith="DEMO-"
+        ).delete()
+        EDIFileTransferLog.objects.filter(
+            edi_file__batch__batch_number__startswith="DEMO-"
         ).delete()
         EDIFile.objects.filter(batch__batch_number__startswith="DEMO-").delete()
         EDIControlNumber.objects.filter(
@@ -152,7 +163,7 @@ class Command(BaseCommand):
         Claim.objects.filter(claim_number__startswith="DEMO-").delete()
         NemtTrip.objects.filter(pickup__startswith="DEMO-").delete()
         Patient.objects.filter(medicaid_member_id__startswith="DEMO-").delete()
-        ProviderBillingProfile.objects.filter(npi__in=DEMO_PROVIDER_NPIS).delete()
+        ProviderBillingProfile.objects.filter(npi__startswith="17500").delete()
         TradingPartner.objects.filter(sender_id__startswith="DEMO-TP").delete()
 
     def _seed_long_distance_rules(self):
@@ -173,468 +184,149 @@ class Command(BaseCommand):
             },
         )
 
-    def _seed_trading_partners(self):
-        rows = [
-            ("RedArt DEMO", "DEMO-TP001", "COMEDASSISTPROG", "TEST"),
-            ("RedArt DEMO PROD", "DEMO-TP002", "COMEDASSISTPROG", "PRODUCTION"),
-            ("Demo Clearinghouse A", "DEMO-TP003", "CLEARHOUSEA", "TEST"),
-            ("Demo Clearinghouse B", "DEMO-TP004", "CLEARHOUSEB", "TEST"),
-            ("Demo Backup TP", "DEMO-TP005", "BACKUPRECV", "TEST"),
+    def _seed_trading_partner(self):
+        obj, _ = TradingPartner.objects.update_or_create(
+            sender_id=SAMPLE_SENDER,
+            receiver_id="COMEDASSISTPROG",
+            environment="TEST",
+            defaults={
+                "name": "REDART LLC",
+                "contact_name": "ABDUL WAHAB MIRZA",
+                "contact_phone": "5633075734",
+                "is_active": True,
+            },
+        )
+        return obj
+
+    def _seed_provider(self):
+        obj, _ = ProviderBillingProfile.objects.update_or_create(
+            npi=SAMPLE_NPI,
+            defaults={
+                "legal_name": "REDART LLC",
+                "billing_name": "REDART LLC",
+                "taxonomy_code": "343900000X",
+                "location_id": SAMPLE_NPI,
+                "address_line_1": "1276 SANDALWOOD DR APT B",
+                "city": "COLORADO SPRINGS",
+                "state": "CO",
+                "zip": "80918",
+                "country": "US",
+                "phone": "5633075734",
+                "email": "billing@redart.example",
+                "is_active": True,
+            },
+        )
+        return obj
+
+    def _seed_patient(self):
+        obj, _ = Patient.objects.update_or_create(
+            medicaid_member_id=SAMPLE_MEMBER_ID,
+            defaults={
+                "first_name": "JANE",
+                "last_name": "TESTPATIENT",
+                "date_of_birth": date(1950, 1, 1),
+                "gender": "F",
+                "county": "Pueblo",
+                "address_line_1": "100 TEST STREET",
+                "city": "PUEBLO",
+                "state": "CO",
+                "zip": "81001",
+                "phone": "7195550100",
+                "email": "jane.testpatient@example.com",
+                "is_active": True,
+            },
+        )
+        return obj
+
+    def _seed_trip(self, patient, provider):
+        obj, _ = NemtTrip.objects.update_or_create(
+            patient=patient,
+            provider=provider,
+            service_date=date(2026, 8, 5),
+            pickup="100 TEST STREET, PUEBLO CO",
+            defaults={
+                "dropoff": "Clinic, Pueblo CO",
+                "one_way_miles": Decimal("8.00"),
+                "mileage_units": 1,
+                "driver_first_name": "CHRIS",
+                "driver_last_name": "TESTDRIVER",
+                "charge": Decimal("14.90"),
+                "is_active": True,
+            },
+        )
+        return obj
+
+    def _seed_claim(self, trip):
+        claim, _ = Claim.objects.update_or_create(
+            claim_number=SAMPLE_CLAIM_NUMBER,
+            defaults={
+                "external_id": "SAMPLE-TRIP-0001",
+                "trip": trip,
+                "diagnosis_code": "R69",
+                "place_of_service": "03",
+                "total_charge": Decimal("14.90"),
+                "status": ClaimStatus.READY_FOR_837P,
+                "attachment_required": False,
+                "is_active": True,
+            },
+        )
+        return claim
+
+    def _seed_service_lines(self, claim):
+        dos = date(2026, 8, 5)
+        specs = [
+            ("A0120", Decimal("12.15")),
+            ("S0215", Decimal("2.75")),
         ]
-        partners = []
-        for name, sender, receiver, env in rows:
-            obj, _ = TradingPartner.objects.update_or_create(
-                sender_id=sender,
-                receiver_id=receiver,
-                environment=env,
-                defaults={"name": name, "is_active": True},
-            )
-            partners.append(obj)
-        return partners
-
-    def _seed_providers(self):
-        rows = [
-            (
-                "DEMO Al Shifa Bus Service LLC",
-                "Al Shifa Transportation",
-                "1750000001",
-                "343900000X",
-                "9000201481",
-            ),
-            (
-                "DEMO WALLA INVESTMENT LLC",
-                "WALLA INVESTMENT LLC",
-                "1750000002",
-                "343900000X",
-                "9000201482",
-            ),
-            (
-                "DEMO Mile High NEMT LLC",
-                "Mile High Transport",
-                "1750000003",
-                "343800000X",
-                "9000201483",
-            ),
-            (
-                "DEMO Front Range Rides Inc",
-                "Front Range Rides",
-                "1750000004",
-                "343900000X",
-                "9000201484",
-            ),
-            (
-                "DEMO Peak Care Transit LLC",
-                "Peak Care Transit",
-                "1750000005",
-                "343800000X",
-                "9000201485",
-            ),
-        ]
-        providers = []
-        for legal, billing, npi, taxonomy, location in rows:
-            obj, _ = ProviderBillingProfile.objects.update_or_create(
-                npi=npi,
-                defaults={
-                    "legal_name": legal,
-                    "billing_name": billing,
-                    "taxonomy_code": taxonomy,
-                    "location_id": location,
-                    "revalidation_date": date(2029, 11, 25),
-                    "city": "Denver",
-                    "state": "CO",
-                    "zip": "80202",
-                    "country": "US",
-                    "address_line_1": "100 Main St",
-                    "phone": "3035550100",
-                    "email": f"billing+{npi}@example.com",
-                    "is_active": True,
-                },
-            )
-            providers.append(obj)
-        return providers
-
-    def _seed_patients(self):
-        rows = [
-            ("Ali", "Khan", "DEMO-M0001", "Denver", date(1995, 5, 12), "M"),
-            ("Sara", "Ahmed", "DEMO-M0002", "Aurora", date(1988, 3, 20), "F"),
-            ("Omar", "Hassan", "DEMO-M0003", "Denver", date(2001, 7, 8), "M"),
-            ("Fatima", "Noor", "DEMO-M0004", "Lakewood", date(1979, 11, 2), "F"),
-            ("Yusuf", "Rahman", "DEMO-M0005", "Denver", date(1992, 1, 15), "M"),
-        ]
-        patients = []
-        for first, last, mid, county, dob, gender in rows:
-            obj, _ = Patient.objects.update_or_create(
-                medicaid_member_id=mid,
-                defaults={
-                    "first_name": first,
-                    "last_name": last,
-                    "date_of_birth": dob,
-                    "gender": gender,
-                    "county": county,
-                    "address_line_1": f"{100 + len(patients)} Main St",
-                    "city": county,
-                    "state": "CO",
-                    "zip": "80202",
-                    "phone": "3035550100",
-                    "email": f"{first.lower()}.{last.lower()}@example.com",
-                    "is_active": True,
-                },
-            )
-            patients.append(obj)
-        return patients
-
-    def _seed_trips(self, patients, providers):
-        # Mix short and long-distance (78 miles) for realistic flags
-        miles_list = [
-            Decimal("12.00"),
-            Decimal("30.00"),
-            Decimal("78.00"),
-            Decimal("45.00"),
-            Decimal("90.00"),
-        ]
-        trips = []
-        base = date(2026, 8, 26)
-        for i in range(5):
-            miles = miles_list[i]
-            units = int(miles)
-            pickup = f"DEMO-Pickup-{i + 1}"
-            obj, _ = NemtTrip.objects.update_or_create(
-                patient=patients[i],
-                provider=providers[i],
-                service_date=base + timedelta(days=i),
-                pickup=pickup,
-                defaults={
-                    "dropoff": f"DEMO-Clinic-{i + 1}",
-                    "one_way_miles": miles,
-                    "mileage_units": units,
-                    "charge": Decimal(str(50 + i * 25)),
-                    "is_active": True,
-                },
-            )
-            trips.append(obj)
-        return trips
-
-    def _seed_claims(self, trips):
-        claims = []
-        for i, trip in enumerate(trips):
-            claim_number = f"DEMO-C00{i + 1}"
-            claim, created = Claim.objects.get_or_create(
-                claim_number=claim_number,
-                defaults={
-                    "external_id": f"DEMO-TRIP-{1001 + i}",
-                    "trip": trip,
-                    "diagnosis_code": "R68.89",
-                    "place_of_service": "41",
-                    "total_charge": trip.charge,
-                    "status": ClaimStatus.DRAFT,
-                    "is_active": True,
-                },
-            )
-            if created or claim.trip_id != trip.id:
-                claim.trip = trip
-                claim.external_id = f"DEMO-TRIP-{1001 + i}"
-                claim.diagnosis_code = "R68.89"
-                claim.place_of_service = "41"
-                claim.total_charge = trip.charge
-                apply_long_distance_flags(claim, trip)
-                claim.save()
-            claims.append(claim)
-        return claims
-
-    def _seed_service_lines(self, claims):
         lines = []
-        for i, claim in enumerate(claims):
-            trip = claim.trip
+        for code, charge in specs:
             line, _ = ClaimServiceLine.objects.update_or_create(
                 claim=claim,
-                procedure_code="A0100",
+                procedure_code=code,
                 defaults={
-                    "from_date": trip.service_date if trip else date(2026, 8, 30),
-                    "to_date": trip.service_date if trip else date(2026, 8, 30),
-                    "units": trip.mileage_units if trip else 1,
-                    "mileage": trip.one_way_miles if trip else Decimal("1.00"),
-                    "charge": claim.total_charge or Decimal("50.00"),
+                    "from_date": dos,
+                    "to_date": dos,
+                    "units": 1,
+                    "mileage": Decimal("0.00") if code == "S0215" else Decimal("8.00"),
+                    "charge": charge,
                     "is_active": True,
                 },
             )
             lines.append(line)
-            # Second line on some claims so we still have 5+ line rows with variety
-            if i < 2:
-                extra, _ = ClaimServiceLine.objects.update_or_create(
-                    claim=claim,
-                    procedure_code="A0110",
-                    defaults={
-                        "from_date": trip.service_date if trip else date(2026, 8, 30),
-                        "to_date": trip.service_date if trip else date(2026, 8, 30),
-                        "units": 1,
-                        "mileage": Decimal("0.00"),
-                        "charge": Decimal("25.00"),
-                        "is_active": True,
-                    },
-                )
-                lines.append(extra)
-            # Keep claim.total_charge aligned with active service lines (CLM02).
-            line_sum = sum(
-                (ln.charge or Decimal("0") for ln in claim.service_lines.filter(is_active=True)),
-                Decimal("0"),
-            )
-            if claim.total_charge != line_sum:
-                claim.total_charge = line_sum
-                claim.save(update_fields=["total_charge", "updated_at"])
         return lines
 
-    def _seed_documents(self, claims):
-        docs = []
-        for claim in claims:
-            if not claim.attachment_required:
-                continue
-            for doc_type, suffix, digest in (
-                (DocumentType.STANDARD_TRIP_LOG, "trip_log", "HASH-TRIP"),
-                (DocumentType.MILE_25_VERIFICATION, "verification", "HASH-25"),
-            ):
-                obj, _ = ClaimDocument.objects.update_or_create(
-                    claim=claim,
-                    document_type=doc_type,
-                    defaults={
-                        "file_name": f"{suffix}_{claim.claim_number}.pdf",
-                        "document_hash": f"{digest}-{claim.claim_number}",
-                        "is_signed": True,
-                        "status": DocumentStatus.COMPLETE,
-                        "is_active": True,
-                    },
-                )
-                docs.append(obj)
-            sync_claim_document_status(claim)
-        # Ensure at least 5 document rows: add OTHER docs on non-LD claims if needed
-        if len(docs) < 5:
-            for claim in claims:
-                if len(docs) >= 5:
-                    break
-                if claim.attachment_required:
-                    continue
-                obj, _ = ClaimDocument.objects.update_or_create(
-                    claim=claim,
-                    document_type=DocumentType.OTHER,
-                    defaults={
-                        "file_name": f"note_{claim.claim_number}.pdf",
-                        "document_hash": f"HASH-OTHER-{claim.claim_number}",
-                        "is_signed": True,
-                        "status": DocumentStatus.COMPLETE,
-                        "is_active": True,
-                    },
-                )
-                docs.append(obj)
-        return docs
-
-    def _seed_batches(self, partners, claims):
-        batches = []
-        batch_claims = []
-        ready_claims = [
-            c
-            for c in claims
-            if Claim.objects.filter(
-                pk=c.pk, status=ClaimStatus.READY_FOR_837P, is_active=True
-            ).exists()
-        ]
-        for i in range(5):
-            batch_number = f"DEMO-RB-2026-{10048 + i}"
-            batch, _ = SubmissionBatch.objects.update_or_create(
-                batch_number=batch_number,
-                defaults={
-                    "trading_partner": partners[i % len(partners)],
-                    "environment": "TEST",
-                    "status": BatchStatus.READY,
-                    "is_active": True,
-                },
-            )
-            batches.append(batch)
-
-        # Put first ready claim into first batch (Ali-style demo)
-        if ready_claims:
-            claim = ready_claims[0]
-            existing = BatchClaim.objects.filter(
-                batch=batches[0], claim=claim
-            ).first()
-            if existing is None:
-                try:
-                    row = add_claim_to_batch(
-                        batch_id=batches[0].id,
-                        claim_id=claim.id,
-                        st02="0001",
-                    )
-                    batch_claims.append(row)
-                except ValueError:
-                    pass
-            else:
-                batch_claims.append(existing)
-
-        # Fill remaining batch_claims with other ready claims across batches
-        idx = 1
-        for claim in ready_claims[1:]:
-            if idx >= len(batches):
-                break
-            batch = batches[idx]
-            if BatchClaim.objects.filter(batch=batch, claim=claim).exists():
-                batch_claims.append(
-                    BatchClaim.objects.get(batch=batch, claim=claim)
-                )
-            else:
-                try:
-                    row = add_claim_to_batch(
-                        batch_id=batch.id,
-                        claim_id=claim.id,
-                    )
-                    batch_claims.append(row)
-                except ValueError:
-                    pass
-            idx += 1
-
-        for batch in batches:
-            refresh_batch_totals(batch)
-
-        return batches, batch_claims
-
-    def _seed_edi(self, batches):
-        controls = []
-        files = []
-        for i, batch in enumerate(batches):
-            batch.refresh_from_db()
-            if batch.claim_count < 1:
-                continue
-
-            existing_file = EDIFile.objects.filter(
-                batch=batch, is_active=True
-            ).first()
-            if existing_file is not None:
-                files.append(existing_file)
-                if existing_file.control_number_id:
-                    controls.append(existing_file.control_number)
-                continue
-
-            try:
-                edi = create_edi_file_for_batch(
-                    batch_id=batch.id,
-                    file_hash=f"DEMO-FILEHASH-{i + 1:03d}",
-                    path_or_blob_ref=f"s3://edi/demo/{batch.batch_number}.txt",
-                    status=EDIFileStatus.GENERATED,
-                )
-                edi = mark_edi_file_uploaded(
-                    edi.id,
-                    path_or_blob_ref=edi.path_or_blob_ref,
-                    file_hash=edi.file_hash,
-                )
-                files.append(edi)
-                if edi.control_number_id:
-                    controls.append(edi.control_number)
-            except ValueError:
-                continue
-        return controls, files
-
-    def _seed_acknowledgements(self, batches, batch_claims, edi_files):
-        acks = []
-        if not batches or not batch_claims:
-            return acks
-        batch = batches[0]
-        row = next((bc for bc in batch_claims if bc.batch_id == batch.id), None)
-        if row is None:
-            return acks
-        edi_file = next((f for f in edi_files if f.batch_id == batch.id), None)
-        existing = EDIAcknowledgement.objects.filter(
-            batch=batch,
-            affected_st02=row.st02,
-            ack_type=AcknowledgementType.X999,
-            is_active=True,
-        ).first()
-        if existing:
-            acks.append(existing)
-            return acks
-        ack, _ = apply_edi_acknowledgement(
-            batch_id=batch.id,
-            ack_type=AcknowledgementType.X999,
-            status=AcknowledgementStatus.ACCEPTED,
-            affected_st02=row.st02 or "0001",
-            raw_file_ref=f"s3://edi/999_{batch.batch_number}.edi",
-            edi_file_id=edi_file.id if edi_file else None,
-            message="Demo 999 accepted (not payment).",
-            apply_claim_status=True,
+    def _seed_batch(self, partner, claim):
+        batch, _ = SubmissionBatch.objects.update_or_create(
+            batch_number=SAMPLE_BATCH_NUMBER,
+            defaults={
+                "trading_partner": partner,
+                "environment": "TEST",
+                "status": BatchStatus.READY,
+                "is_active": True,
+            },
         )
-        acks.append(ack)
-        return acks
-
-    def _seed_attachment_submissions(self, claims):
-        rows = []
-        ld_claims = [c for c in claims if c.attachment_required]
-        for i, claim in enumerate(ld_claims[:5]):
-            ref = f"HCPF-ATT-DEMO-{i + 1:03d}"
-            obj, created = AttachmentSubmission.objects.update_or_create(
-                submission_reference=ref,
-                defaults={
-                    "claim": claim,
-                    "channel": AttachmentRoute.HCPF_PORTAL,
-                    "status": AttachmentSubmissionStatus.CONFIRMED,
-                    "notes": "Demo HCPF portal attachment confirmation.",
-                    "is_active": True,
-                },
+        existing = BatchClaim.objects.filter(
+            batch=batch, claim=claim, is_active=True
+        ).first()
+        if existing is None:
+            add_claim_to_batch(
+                batch_id=batch.id, claim_id=claim.id, st02="0001"
             )
-            if created or obj.confirmed_at is None:
-                from django.utils import timezone
-
-                now = timezone.now()
-                obj.submitted_at = obj.submitted_at or now
-                obj.confirmed_at = obj.confirmed_at or now
-                obj.save(
-                    update_fields=["submitted_at", "confirmed_at", "updated_at"]
-                )
-            sync_claim_from_attachment_submission(obj)
-            rows.append(obj)
-        return rows
-
-    def _seed_sftp(self, partners):
-        creds = []
-        dirs = []
-        for i in range(5):
-            name = f"DEMO-SFTP-{i + 1:02d}"
-            cred, _ = SFTPCredentials.objects.update_or_create(
-                name=name,
-                environment="TEST",
-                defaults={
-                    "trading_partner": partners[i % len(partners)],
-                    "host": f"mft-demo-{i + 1}.example.com",
-                    "port": 22,
-                    "username": f"demo_user_{i + 1}",
-                    "auth_type": SFTPAuthType.PASSWORD,
-                    "password": f"DEMO-ONLY-PASSWORD-{i + 1}",
-                    "timeout_seconds": 30,
-                    "notes": "Demo SFTP credentials — not real.",
-                    "is_active": True,
-                },
+            existing = BatchClaim.objects.get(
+                batch=batch, claim=claim, is_active=True
             )
-            creds.append(cred)
-            directory, _ = SFTPDirectory.objects.update_or_create(
-                credentials=cred,
-                purpose=SFTPDirectoryPurpose.OUTBOUND_837P,
-                sending_path=f"/demo/outbound/837p/{i + 1}",
-                receiving_path=f"/demo/inbound/999/{i + 1}",
-                defaults={
-                    "name": f"DEMO outbound {i + 1}",
-                    "is_active": True,
-                },
-            )
-            dirs.append(directory)
-        return creds, dirs
+        else:
+            existing.st02 = "0001"
+            existing.save(update_fields=["st02", "updated_at"])
+        refresh_batch_totals(batch)
+        batch.refresh_from_db()
+        return batch, existing
 
     def _seed_sftp_from_env(self, partners):
-        """
-        Seed real/test SFTP from env (SFTP_SEED_HOST / USER / PASSWORD).
-        Creates /send (OUTBOUND_837P) and /recv (INBOUND_999) directories.
-        """
         host = (getattr(settings, "SFTP_SEED_HOST", "") or "").strip()
         username = (getattr(settings, "SFTP_SEED_USERNAME", "") or "").strip()
         password = (getattr(settings, "SFTP_SEED_PASSWORD", "") or "").strip()
         if not host or not username or not password:
-            self.stdout.write(
-                "  SFTP env seed skipped (set SFTP_SEED_HOST/USERNAME/PASSWORD)."
-            )
             return None, []
 
         name = getattr(settings, "SFTP_SEED_NAME", "SEED-SFTP-CLOUD") or "SEED-SFTP-CLOUD"
@@ -676,7 +368,7 @@ class Command(BaseCommand):
             sending_path=send_path,
             receiving_path=recv_path,
             defaults={
-                "name": f"{name} recv/999",
+                "name": f"{name} Import 999 recv",
                 "is_active": True,
             },
         )

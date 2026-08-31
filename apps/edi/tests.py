@@ -247,14 +247,13 @@ class Generate837PTests(EDIFixturesMixin, APITestCase):
         self.assertIn("COMEDASSISTPROG", body)
         self.assertIn("CO_TXIX", body)
         self.assertIn("ST*837*", body)
-        # 2000A: PRV before 2010AA NM1; 2010AA: REF*EI after N4
+        # Client-approved sample: HL → NM1*85 (no PRV); REF*EI after N4
         hl_i = body.index("HL*1**20*1~")
-        prv_i = body.index("PRV*BI*PXC*")
         nm1_i = body.index("NM1*85*")
         ref_i = body.index("REF*EI*")
-        self.assertLess(hl_i, prv_i)
-        self.assertLess(prv_i, nm1_i)
+        self.assertLess(hl_i, nm1_i)
         self.assertLess(nm1_i, ref_i)
+        self.assertNotIn("PRV*BI*", body)
         self.assertTrue(body.strip().endswith("IEA*1*000000001~") or "IEA*1*" in body)
 
         edi_file, _, _ = handler.generate()
@@ -396,3 +395,249 @@ class EDIAcknowledgementAPITests(EDIFixturesMixin, APITestCase):
         )
         self.assertEqual(listed.status_code, status.HTTP_200_OK)
         self.assertGreaterEqual(listed.data["count"], 1)
+
+    def test_import_999_parses_client_sample(self):
+        edi = create_edi_file_for_batch(
+            batch_id=self.batch.id,
+            file_hash="ACKHASH2",
+            path_or_blob_ref="media/edi/demo2.txt",
+        )
+        mark_edi_file_uploaded(edi.id)
+        content = (
+            "ISA*00*          *00*          *ZZ*COMEDASSISTPROG*ZZ*89513013       "
+            "*260817*1947*^*00501*000000001*0*T*:~"
+            "GS*FA*COMEDASSISTPROG*89513013*20260817*1947*1*X*005010X231A1~"
+            "ST*999*0001*005010X231A1~"
+            "AK1*HC*1*005010X222A1~"
+            "AK2*837*0001*005010X222A1~"
+            "IK5*A~"
+            "AK9*A*1*1*1~"
+            "SE*6*0001~"
+            "GE*1*1~"
+            "IEA*1*000000001~"
+        )
+        response = self.client.post(
+            reverse("edi-acknowledgement-import-999"),
+            {
+                "batch_id": self.batch.id,
+                "edi_file_id": edi.id,
+                "raw_file_ref": "s3://edi/999_001.edi",
+                "content": content,
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data["data"]["status"], "ACCEPTED")
+        self.assertEqual(response.data["data"]["affected_st02"], "0001")
+        self.assertEqual(response.data["data"]["parsed"]["ik5_code"], "A")
+        self.claim.refresh_from_db()
+        self.assertEqual(self.claim.status, ClaimStatus.EDI_ACCEPTED)
+
+    def test_generate_includes_driver_nm1_dn(self):
+        from apps.edi.utils.handler import Generate837PHandler
+        from apps.edi.utils.schema import build_edi_content, render_edi_file
+
+        self.trip.driver_first_name = "CHRIS"
+        self.trip.driver_last_name = "TESTDRIVER"
+        self.trip.save(
+            update_fields=["driver_first_name", "driver_last_name", "updated_at"]
+        )
+        payload = Generate837PHandler(self.batch.id).build_payload_dict()
+        body = render_edi_file(build_edi_content(payload))
+        self.assertIn("NM1*DN*1*TESTDRIVER*CHRIS~", body)
+        hi_i = body.index("HI*ABK:")
+        dn_i = body.index("NM1*DN*")
+        lx_i = body.index("LX*1~")
+        self.assertLess(hi_i, dn_i)
+        self.assertLess(dn_i, lx_i)
+
+
+class EDI999ImportAPITests(EDIFixturesMixin, APITestCase):
+    def test_poll_import_999_async_returns_celery_task(self):
+        from unittest.mock import patch
+
+        with patch("apps.edi.import_999_views.poll_edi_999_imports") as mock_poll:
+            mock_poll.delay.return_value.id = "task-import-999-1"
+            response = self.client.post(
+                reverse("edi-999-import-poll"),
+                {"async_mode": True},
+                format="json",
+            )
+        self.assertEqual(response.status_code, status.HTTP_202_ACCEPTED)
+        self.assertEqual(response.data["data"]["message"], "Importing started.")
+        self.assertEqual(response.data["data"]["celery_task_id"], "task-import-999-1")
+        mock_poll.delay.assert_called_once()
+
+    def test_list_edi_999_imports(self):
+        from apps.edi.choices import EDI999ImportStatus
+        from apps.edi.models import EDI999Import, SFTPCredentials
+
+        cred = SFTPCredentials.objects.create(
+            name="TEST-SFTP-999",
+            trading_partner=self.partner,
+            environment="TEST",
+            host="127.0.0.1",
+            port=22,
+            username="user",
+            auth_type="PASSWORD",
+            password="secret",
+            is_active=True,
+        )
+        EDI999Import.objects.create(
+            credentials=cred,
+            filename="ack_0001.999",
+            remote_path="/recv/ack_0001.999",
+            status=EDI999ImportStatus.QUEUED,
+            message="Importing started (Celery task queued).",
+        )
+        response = self.client.get(reverse("edi-999-import-list"))
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertGreaterEqual(response.data["count"], 1)
+
+    def test_process_import_999_parses_and_marks_imported(self):
+        from unittest.mock import patch
+
+        from apps.edi.choices import EDI999ImportStatus, SFTPDirectoryPurpose
+        from apps.edi.models import EDI999Import, SFTPCredentials, SFTPDirectory
+        from apps.edi.utils.import_999 import process_edi_999_import
+
+        edi = create_edi_file_for_batch(
+            batch_id=self.batch.id,
+            file_hash="HASH999IMP",
+            path_or_blob_ref="media/edi/demo999.txt",
+        )
+        mark_edi_file_uploaded(edi.id)
+        # Ensure control gs06 matches sample AK1 group control "1"
+        ctrl = edi.control_number
+        if ctrl:
+            ctrl.gs06 = "1"
+            ctrl.isa13 = "000000001"
+            ctrl.save(update_fields=["gs06", "isa13", "updated_at"])
+
+        cred = SFTPCredentials.objects.create(
+            name="TEST-SFTP-999-PROC",
+            trading_partner=self.partner,
+            environment="TEST",
+            host="127.0.0.1",
+            port=22,
+            username="user",
+            auth_type="PASSWORD",
+            password="secret",
+            is_active=True,
+        )
+        directory = SFTPDirectory.objects.create(
+            credentials=cred,
+            name="inbound-999",
+            purpose=SFTPDirectoryPurpose.INBOUND_999,
+            sending_path="/send",
+            receiving_path="/recv",
+            is_active=True,
+        )
+        row = EDI999Import.objects.create(
+            credentials=cred,
+            directory=directory,
+            batch=self.batch,
+            filename="client_999.edi",
+            remote_path="/recv/client_999.edi",
+            status=EDI999ImportStatus.QUEUED,
+        )
+        content = (
+            "ISA*00*          *00*          *ZZ*COMEDASSISTPROG*ZZ*89513013       "
+            "*260817*1947*^*00501*000000001*0*T*:~"
+            "GS*FA*COMEDASSISTPROG*89513013*20260817*1947*1*X*005010X231A1~"
+            "ST*999*0001*005010X231A1~"
+            "AK1*HC*1*005010X222A1~"
+            "AK2*837*0001*005010X222A1~"
+            "IK5*A~"
+            "AK9*A*1*1*1~"
+            "SE*6*0001~"
+            "GE*1*1~"
+            "IEA*1*000000001~"
+        ).encode("utf-8")
+
+        with patch(
+            "apps.edi.utils.import_999.download_bytes_via_sftp",
+            return_value=content,
+        ):
+            result = process_edi_999_import(row.id, batch_id=self.batch.id)
+
+        self.assertEqual(result["status"], EDI999ImportStatus.IMPORTED)
+        row.refresh_from_db()
+        self.assertEqual(row.status, EDI999ImportStatus.IMPORTED)
+        self.assertIsNotNone(row.acknowledgement_id)
+        self.claim.refresh_from_db()
+        self.assertEqual(self.claim.status, ClaimStatus.EDI_ACCEPTED)
+
+    def test_generate_matches_approved_sample_shape(self):
+        from apps.edi.utils.handler import Generate837PHandler
+        from apps.edi.utils.schema import build_edi_content, render_edi_file
+
+        self.partner.name = "REDART LLC"
+        self.partner.sender_id = "89513013"
+        self.partner.contact_name = "ABDUL WAHAB MIRZA"
+        self.partner.contact_phone = "5633075734"
+        self.partner.save()
+        self.provider.billing_name = "REDART LLC"
+        self.provider.npi = "9000211959"
+        self.provider.address_line_1 = "1276 SANDALWOOD DR APT B"
+        self.provider.city = "COLORADO SPRINGS"
+        self.provider.state = "CO"
+        self.provider.zip = "80918"
+        self.provider.save()
+        self.patient.first_name = "JANE"
+        self.patient.last_name = "TESTPATIENT"
+        self.patient.medicaid_member_id = "Y999999"
+        self.patient.address_line_1 = "100 TEST STREET"
+        self.patient.city = "PUEBLO"
+        self.patient.zip = "81001"
+        self.patient.date_of_birth = date(1950, 1, 1)
+        self.patient.gender = "F"
+        self.patient.save()
+        self.trip.driver_first_name = "CHRIS"
+        self.trip.driver_last_name = "TESTDRIVER"
+        self.trip.service_date = date(2026, 8, 5)
+        self.trip.charge = Decimal("14.90")
+        self.trip.save()
+        self.claim.claim_number = "TESTCLAIM0001"
+        self.claim.diagnosis_code = "R69"
+        self.claim.place_of_service = "03"
+        self.claim.total_charge = Decimal("14.90")
+        self.claim.save()
+        from apps.claim_service_line.models import ClaimServiceLine
+
+        ClaimServiceLine.objects.filter(claim=self.claim).delete()
+        ClaimServiceLine.objects.create(
+            claim=self.claim,
+            procedure_code="A0120",
+            from_date=date(2026, 8, 5),
+            to_date=date(2026, 8, 5),
+            units=1,
+            charge=Decimal("12.15"),
+            is_active=True,
+        )
+        ClaimServiceLine.objects.create(
+            claim=self.claim,
+            procedure_code="S0215",
+            from_date=date(2026, 8, 5),
+            to_date=date(2026, 8, 5),
+            units=1,
+            charge=Decimal("2.75"),
+            is_active=True,
+        )
+        bc = BatchClaim.objects.get(batch=self.batch, claim=self.claim)
+        bc.st02 = "0001"
+        bc.save(update_fields=["st02", "updated_at"])
+
+        payload = Generate837PHandler(self.batch.id).build_payload_dict()
+        body = render_edi_file(build_edi_content(payload))
+
+        self.assertIn("NM1*41*2*REDART LLC*****46*89513013~", body)
+        self.assertIn("PER*IC*ABDUL WAHAB MIRZA*TE*5633075734~", body)
+        self.assertIn("NM1*85*2*REDART LLC*****XX*9000211959~", body)
+        self.assertIn("CLM*TESTCLAIM0001*14.90***03:B:1*Y*A*Y*Y~", body)
+        self.assertIn("HI*ABK:R69~", body)
+        self.assertIn("NM1*DN*1*TESTDRIVER*CHRIS~", body)
+        self.assertIn("SV1*HC:A0120*12.15*UN*1***1~", body)
+        self.assertIn("SV1*HC:S0215*2.75*UN*1***1~", body)
+        self.assertIn("BHT*0019*00*0001*", body)
+        self.assertNotIn("PRV*BI*", body)
