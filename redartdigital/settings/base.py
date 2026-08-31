@@ -3,6 +3,7 @@ Shared Django settings for the EDI microservice.
 Environment-specific values live in local.py / production.py.
 """
 
+from datetime import timedelta
 from pathlib import Path
 
 import environ
@@ -144,6 +145,7 @@ REST_FRAMEWORK = {
     "DEFAULT_PAGINATION_CLASS": "apps.core.pagination.StandardPagination",
     "PAGE_SIZE": 50,
     "DEFAULT_AUTHENTICATION_CLASSES": [
+        "rest_framework_simplejwt.authentication.JWTAuthentication",
         "rest_framework.authentication.SessionAuthentication",
     ],
     "DEFAULT_PERMISSION_CLASSES": [
@@ -151,9 +153,26 @@ REST_FRAMEWORK = {
     ],
 }
 
+# RedArt server-to-server auth (obtain via POST /api/v1/auth/token/).
+SIMPLE_JWT = {
+    "ACCESS_TOKEN_LIFETIME": timedelta(
+        minutes=env.int("JWT_ACCESS_MINUTES", default=60)
+    ),
+    "REFRESH_TOKEN_LIFETIME": timedelta(
+        days=env.int("JWT_REFRESH_DAYS", default=7)
+    ),
+    "ROTATE_REFRESH_TOKENS": False,
+    "UPDATE_LAST_LOGIN": True,
+    "AUTH_HEADER_TYPES": ("Bearer",),
+}
+
 SPECTACULAR_SETTINGS = {
     "TITLE": "RedArt EDI API",
-    "DESCRIPTION": "Colorado Medicaid 837P EDI microservice",
+    "DESCRIPTION": (
+        "Colorado Medicaid 837P EDI microservice. "
+        "Authenticate with POST /api/v1/auth/token/ then send "
+        "Authorization: Bearer <access>."
+    ),
     "VERSION": "0.1.0",
     "ENUM_NAME_OVERRIDES": {
         "ClaimStatus": "apps.claim.choices.ClaimStatus",
@@ -166,7 +185,21 @@ SPECTACULAR_SETTINGS = {
         "AcknowledgementStatus": "apps.edi.choices.AcknowledgementStatus",
         "AcknowledgementType": "apps.edi.choices.AcknowledgementType",
     },
+    "APPEND_COMPONENTS": {
+        "securitySchemes": {
+            "bearerAuth": {
+                "type": "http",
+                "scheme": "bearer",
+                "bearerFormat": "JWT",
+            }
+        }
+    },
+    "SECURITY": [{"bearerAuth": []}],
     "TAGS": [
+        {
+            "name": "auth",
+            "description": "JWT obtain / refresh / verify for RedArt server-to-server calls.",
+        },
         {
             "name": "trading_partner",
             "description": "Trading partner CRUD (ISA/GS sender & receiver IDs).",

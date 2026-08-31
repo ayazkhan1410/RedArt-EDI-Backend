@@ -1,12 +1,20 @@
+from io import StringIO
+
 from django.core.management import call_command
 from django.test import SimpleTestCase, TestCase
 from rest_framework.exceptions import ValidationError
 
-from apps.claim.models import BatchClaim, Claim, ClaimDocument, SubmissionBatch
+from apps.claim.models import Claim, SubmissionBatch
 from apps.claim_service_line.models import ClaimServiceLine
+from apps.core.management.commands.seed_demo_data import (
+    SAMPLE_BATCH_NUMBER,
+    SAMPLE_CLAIM_NUMBER,
+    SAMPLE_MEMBER_ID,
+    SAMPLE_NPI,
+    SAMPLE_SENDER,
+)
 from apps.core.pagination import StandardPagination
 from apps.core.utils.responses import error_response, success_response
-from apps.edi.models import EDIControlNumber, EDIFile, SFTPCredentials, SFTPDirectory
 from apps.long_distance_rule.models import LongDistanceRule
 from apps.nemt_trip.models import NemtTrip
 from apps.patient.models import Patient
@@ -45,36 +53,33 @@ class ResponseHelperTests(SimpleTestCase):
 
 
 class SeedDemoDataTests(TestCase):
-    def test_seed_creates_at_least_five_per_model(self):
-        call_command("seed_demo_data")
+    def test_seed_creates_approved_sample_rows(self):
+        out = StringIO()
+        call_command("seed_demo_data", "--flush-all", stdout=out)
 
-        self.assertGreaterEqual(TradingPartner.objects.count(), 5)
-        self.assertGreaterEqual(ProviderBillingProfile.objects.count(), 5)
-        self.assertGreaterEqual(Patient.objects.count(), 5)
-        self.assertGreaterEqual(NemtTrip.objects.count(), 5)
         self.assertEqual(
-            LongDistanceRule.objects.filter(is_active=True).count(),
-            2,
-        )
-        self.assertGreaterEqual(Claim.objects.count(), 5)
-        self.assertGreaterEqual(ClaimServiceLine.objects.count(), 5)
-        self.assertGreaterEqual(ClaimDocument.objects.count(), 5)
-        self.assertGreaterEqual(SubmissionBatch.objects.count(), 5)
-        self.assertGreaterEqual(BatchClaim.objects.count(), 1)
-        self.assertGreaterEqual(EDIControlNumber.objects.count(), 1)
-        self.assertGreaterEqual(EDIFile.objects.count(), 1)
-        self.assertGreaterEqual(SFTPCredentials.objects.count(), 5)
-        self.assertGreaterEqual(SFTPDirectory.objects.count(), 5)
-
-        # Idempotent re-run should not explode / duplicate claim numbers
-        call_command("seed_demo_data")
-        self.assertEqual(
-            Claim.objects.filter(claim_number__startswith="DEMO-").count(),
-            5,
+            TradingPartner.objects.filter(sender_id=SAMPLE_SENDER).count(), 1
         )
         self.assertEqual(
-            SubmissionBatch.objects.filter(
-                batch_number__startswith="DEMO-"
-            ).count(),
-            5,
+            ProviderBillingProfile.objects.filter(npi=SAMPLE_NPI).count(), 1
+        )
+        self.assertEqual(
+            Patient.objects.filter(medicaid_member_id=SAMPLE_MEMBER_ID).count(), 1
+        )
+        self.assertGreaterEqual(NemtTrip.objects.count(), 1)
+        self.assertEqual(
+            Claim.objects.filter(claim_number=SAMPLE_CLAIM_NUMBER).count(), 1
+        )
+        self.assertEqual(ClaimServiceLine.objects.count(), 2)
+        self.assertEqual(
+            SubmissionBatch.objects.filter(batch_number=SAMPLE_BATCH_NUMBER).count(),
+            1,
+        )
+        self.assertEqual(LongDistanceRule.objects.filter(is_active=True).count(), 2)
+        self.assertIn("Approved-sample seed complete", out.getvalue())
+
+        # Idempotent re-run
+        call_command("seed_demo_data", stdout=StringIO())
+        self.assertEqual(
+            Claim.objects.filter(claim_number=SAMPLE_CLAIM_NUMBER).count(), 1
         )

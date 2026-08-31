@@ -16,6 +16,11 @@ from apps.claim.document_views import (
     ClaimDocumentListCreateAPIView,
     ClaimDocumentStatusAPIView,
 )
+from apps.claim.status_views import (
+    ClaimStatusAPIView,
+    ClaimValidateAPIView,
+    SubmissionBatchStatusAPIView,
+)
 from apps.claim.views import (
     ClaimDetailAPIView,
     ClaimFromTripAPIView,
@@ -33,6 +38,16 @@ urlpatterns = [
         "claims/<int:pk>/document-status/",
         ClaimDocumentStatusAPIView.as_view(),
         name="claim-document-status",
+    ),
+    path(
+        "claims/<int:pk>/validate/",
+        ClaimValidateAPIView.as_view(),
+        name="claim-validate",
+    ),
+    path(
+        "claims/<int:pk>/status/",
+        ClaimStatusAPIView.as_view(),
+        name="claim-status",
     ),
     path("claims/<int:pk>/", ClaimDetailAPIView.as_view(), name="claim-detail"),
     path(
@@ -64,6 +79,11 @@ urlpatterns = [
         "submission-batches/<int:pk>/add-claim/",
         SubmissionBatchAddClaimAPIView.as_view(),
         name="submission-batch-add-claim",
+    ),
+    path(
+        "submission-batches/<int:pk>/status/",
+        SubmissionBatchStatusAPIView.as_view(),
+        name="submission-batch-status",
     ),
     path(
         "submission-batches/<int:pk>/",
