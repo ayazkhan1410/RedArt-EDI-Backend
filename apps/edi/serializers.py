@@ -9,6 +9,8 @@ from apps.edi.choices import (
 )
 from apps.edi.models import (
     EDI999Import,
+    EDI835ClaimPayment,
+    EDI835Remittance,
     EDIAcknowledgement,
     EDIControlNumber,
     EDIFile,
@@ -546,3 +548,100 @@ class PollEDI999ImportsSerializer(serializers.Serializer):
         default=True,
         help_text="If true, enqueue Celery poll_edi_999_imports; else run discover+queue inline.",
     )
+
+
+class Import835RemittanceSerializer(serializers.Serializer):
+    content = serializers.CharField()
+    raw_file_ref = serializers.CharField(
+        required=False, allow_blank=True, allow_null=True
+    )
+    apply_claim_status = serializers.BooleanField(required=False, default=True)
+
+    def validate_content(self, value):
+        text = (value or "").strip()
+        if not text:
+            raise serializers.ValidationError("content is required.")
+        if len(text) > 2_000_000:
+            raise serializers.ValidationError("content exceeds maximum size.")
+        return text
+
+    def validate_raw_file_ref(self, value):
+        return clean_optional_text(value)
+
+
+class EDI835ClaimPaymentSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = EDI835ClaimPayment
+        fields = (
+            "id",
+            "claim",
+            "claim_number",
+            "clp_status_code",
+            "outcome",
+            "charge_amount",
+            "payment_amount",
+            "patient_responsibility",
+            "payer_claim_control",
+            "adjustment_codes",
+            "prior_claim_status",
+            "status_applied",
+            "skip_reason",
+            "is_active",
+            "created_at",
+        )
+        read_only_fields = fields
+
+
+class EDI835RemittanceSerializer(serializers.ModelSerializer):
+    claim_payments = EDI835ClaimPaymentSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = EDI835Remittance
+        fields = (
+            "id",
+            "file_hash",
+            "raw_file_ref",
+            "isa13",
+            "gs06",
+            "st02",
+            "trace_number",
+            "payment_method",
+            "total_payment",
+            "payment_date",
+            "message",
+            "claim_line_count",
+            "applied_claim_count",
+            "claim_payments",
+            "is_active",
+            "created_at",
+            "updated_at",
+        )
+        read_only_fields = fields
+
+
+class EDI835RemittanceListSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = EDI835Remittance
+        fields = (
+            "id",
+            "file_hash",
+            "raw_file_ref",
+            "isa13",
+            "gs06",
+            "st02",
+            "trace_number",
+            "payment_method",
+            "total_payment",
+            "payment_date",
+            "message",
+            "claim_line_count",
+            "applied_claim_count",
+            "is_active",
+            "created_at",
+            "updated_at",
+        )
+        read_only_fields = fields
+
+
+class EDI835RemittanceIdSerializer(serializers.Serializer):
+    id = serializers.IntegerField(read_only=True)

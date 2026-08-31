@@ -5,7 +5,17 @@ class TransactionType(models.TextChoices):
     X837P = "837P", "837 Professional"
     X999 = "999", "Implementation Acknowledgment"
     X277 = "277", "Claim Status"
+    X835 = "835", "Payment / Remittance Advice"
     OTHER = "OTHER", "Other"
+
+
+class RemittanceClaimOutcome(models.TextChoices):
+    """Mapped claim outcome from 835 CLP02 (payment vs denial)."""
+
+    PAID = "PAID", "Paid"
+    DENIED = "DENIED", "Denied"
+    UNDER_REVIEW = "UNDER_REVIEW", "Under review"
+    IGNORED = "IGNORED", "Ignored / not applied"
 
 
 class AcknowledgementType(models.TextChoices):

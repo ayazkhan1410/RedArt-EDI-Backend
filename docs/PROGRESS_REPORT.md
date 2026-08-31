@@ -19,6 +19,7 @@
 | 837P generate (client-approved sample shape) | Done |
 | Upload to HCPF SFTP + MinIO + transfer logs | Done |
 | 999 import (paste + SFTP poll) / apply (never sets PAID) | Done |
+| 835 remittance import → Claim PAID / DENIED (CLP-driven) | Done |
 | JWT auth: `POST /api/v1/auth/token/` (+ refresh/verify) | Done |
 | API service user (`create_api_service_user`, group `edi_api_service`) | Done |
 | Sample curl pack: `docs/REDART_API_SAMPLES.md` | Done |
@@ -40,14 +41,14 @@ Enforce auth in Docker/local: `API_REQUIRE_AUTH=true`
 
 | # | Item | Owner / note |
 |---|------|----------------|
-| 1 | Deployed TEST API URL + service user credential (secure delivery) | Ops / EDI eng |
+| 1 | Deployed TEST API URL + secure credential delivery | **Ready to deploy** — `render.yaml` + `docs/LOVABLE_EDI_DEPLOY.md` + `deliver_redart_handoff` (needs Render/Railway account) |
 | 2 | Confirm HCPF picked up test 837P + import returned 999 | Ops / wait on HCPF |
 | 3 | Stronger production 837P TR3 coverage | EDI eng (demo OK now) |
-| 4 | 835 paid/denied processing | Later (handoff PDF) |
-| 5 | Live HCPF attachment channel send | Later (tracking exists) |
-| 6 | Production hardening (`API_REQUIRE_AUTH`, HTTPS, secrets) | Deploy |
+| 4 | Live HCPF attachment channel send | Later (tracking exists) |
+| 5 | Production hardening finish + HTTPS on host | Deploy |
+| 6 | 835 SFTP auto-poll (import-paste done) | Later |
 
-**Roughly 6 remaining items** — TEST URL + secure credential delivery still needed for RedArt (#1). Samples + local service user are ready.
+**Note:** Lovable deploys the **UI**, not this Django EDI service. Use Render Blueprint for the API URL, then hand off credentials securely.
 
 ---
 

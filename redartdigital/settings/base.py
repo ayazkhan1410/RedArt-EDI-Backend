@@ -176,6 +176,23 @@ SIMPLE_JWT = {
 EDI_API_SERVICE_USERNAME = env("EDI_API_SERVICE_USERNAME", default="")
 EDI_API_SERVICE_EMAIL = env("EDI_API_SERVICE_EMAIL", default="")
 
+# Public TEST/PROD API base URL shared with RedArt / Lovable (no trailing slash).
+# Example: https://redart-edi-test.onrender.com
+EDI_PUBLIC_BASE_URL = env("EDI_PUBLIC_BASE_URL", default="").rstrip("/")
+
+CORS_ALLOWED_ORIGINS = env.list("CORS_ALLOWED_ORIGINS", default=[])
+CORS_ALLOWED_ORIGIN_REGEXES = env.list("CORS_ALLOWED_ORIGIN_REGEXES", default=[])
+# Lovable hosts the UI only — allow its HTTPS origins when explicitly enabled.
+# Prefer server-to-server: Lovable/UI → RedArt backend → this EDI API (JWT).
+if env.bool("EDI_ALLOW_LOVABLE_ORIGINS", default=False):
+    _lovable_regexes = [
+        r"^https://[\w.-]+\.lovable\.app$",
+        r"^https://[\w.-]+\.lovableproject\.com$",
+    ]
+    CORS_ALLOWED_ORIGIN_REGEXES = list(CORS_ALLOWED_ORIGIN_REGEXES) + [
+        r for r in _lovable_regexes if r not in CORS_ALLOWED_ORIGIN_REGEXES
+    ]
+CORS_ALLOW_CREDENTIALS = env.bool("CORS_ALLOW_CREDENTIALS", default=False)
 
 SPECTACULAR_SETTINGS = {
     "TITLE": "RedArt EDI API",
@@ -207,6 +224,10 @@ SPECTACULAR_SETTINGS = {
     },
     "SECURITY": [{"bearerAuth": []}],
     "TAGS": [
+        {
+            "name": "integration",
+            "description": "Lovable / RedArt integration catalog (endpoints, auth, happy path).",
+        },
         {
             "name": "auth",
             "description": "JWT obtain / refresh / verify for RedArt server-to-server calls.",
@@ -257,8 +278,6 @@ SPECTACULAR_SETTINGS = {
         },
     ],
 }
-
-CORS_ALLOWED_ORIGINS = env.list("CORS_ALLOWED_ORIGINS", default=[])
 
 # ========
 # Celery / Redis

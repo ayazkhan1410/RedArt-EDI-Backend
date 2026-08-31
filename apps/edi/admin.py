@@ -2,6 +2,8 @@ from django.contrib import admin
 
 from apps.edi.models import (
     EDI999Import,
+    EDI835ClaimPayment,
+    EDI835Remittance,
     EDIAcknowledgement,
     EDIControlNumber,
     EDIFile,
@@ -193,3 +195,57 @@ class EDI999ImportAdmin(admin.ModelAdmin):
         "acknowledgement",
     )
     readonly_fields = ("id", "created_at", "updated_at", "started_at", "finished_at")
+
+
+class EDI835ClaimPaymentInline(admin.TabularInline):
+    model = EDI835ClaimPayment
+    extra = 0
+    readonly_fields = (
+        "id",
+        "claim",
+        "claim_number",
+        "clp_status_code",
+        "outcome",
+        "payment_amount",
+        "status_applied",
+        "skip_reason",
+        "created_at",
+    )
+    can_delete = False
+
+
+@admin.register(EDI835Remittance)
+class EDI835RemittanceAdmin(admin.ModelAdmin):
+    list_display = (
+        "id",
+        "trace_number",
+        "total_payment",
+        "payment_date",
+        "claim_line_count",
+        "applied_claim_count",
+        "is_active",
+        "created_at",
+    )
+    list_filter = ("is_active", "payment_method")
+    search_fields = ("file_hash", "trace_number", "isa13", "raw_file_ref", "message")
+    readonly_fields = ("id", "created_at", "updated_at", "file_hash")
+    inlines = [EDI835ClaimPaymentInline]
+
+
+@admin.register(EDI835ClaimPayment)
+class EDI835ClaimPaymentAdmin(admin.ModelAdmin):
+    list_display = (
+        "id",
+        "remittance",
+        "claim_number",
+        "claim",
+        "clp_status_code",
+        "outcome",
+        "payment_amount",
+        "status_applied",
+        "is_active",
+    )
+    list_filter = ("outcome", "status_applied", "is_active")
+    search_fields = ("claim_number", "payer_claim_control", "adjustment_codes")
+    autocomplete_fields = ("remittance", "claim")
+    readonly_fields = ("id", "created_at", "updated_at")

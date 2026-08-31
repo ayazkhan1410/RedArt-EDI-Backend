@@ -6,6 +6,7 @@ from apps.edi.choices import (
     AcknowledgementType,
     EDI999ImportStatus,
     EDIFileStatus,
+    RemittanceClaimOutcome,
     SFTPAuthType,
     SFTPDirectoryPurpose,
     TransactionType,
@@ -534,3 +535,164 @@ class SFTPDirectory(BaseModel):
 
     def __str__(self):
         return self.name or f"{self.purpose} #{self.pk}"
+
+
+class EDI835RemittanceQuerySet(models.QuerySet):
+    def with_relations(self):
+        return self.prefetch_related("claim_payments", "claim_payments__claim")
+
+
+class EDI835Remittance(BaseModel):
+    """
+    One inbound 835 Electronic Remittance Advice (ERA).
+    Payment/denial is driven by CLP rows — never by 999.
+    """
+
+    file_hash = models.CharField(
+        max_length=64,
+        null=True,
+        blank=True,
+        help_text="SHA-256 of normalized content for idempotent re-import.",
+    )
+    raw_file_ref = models.CharField(max_length=1024, null=True, blank=True)
+    isa13 = models.CharField(max_length=16, null=True, blank=True)
+    gs06 = models.CharField(max_length=16, null=True, blank=True)
+    st02 = models.CharField(max_length=16, null=True, blank=True)
+    trace_number = models.CharField(
+        max_length=64,
+        null=True,
+        blank=True,
+        help_text="TRN02 check / EFT trace number when present.",
+    )
+    payment_method = models.CharField(
+        max_length=8,
+        null=True,
+        blank=True,
+        help_text="BPR04 payment method code when present.",
+    )
+    total_payment = models.DecimalField(
+        max_digits=14,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text="BPR02 total provider payment amount.",
+    )
+    payment_date = models.DateField(null=True, blank=True)
+    message = models.CharField(max_length=500, null=True, blank=True)
+    claim_line_count = models.PositiveIntegerField(default=0)
+    applied_claim_count = models.PositiveIntegerField(default=0)
+    is_active = models.BooleanField(default=True)
+
+    objects = EDI835RemittanceQuerySet.as_manager()
+
+    class Meta:
+        verbose_name = "EDI 835 Remittance"
+        verbose_name_plural = "EDI 835 Remittances"
+        ordering = ("-id",)
+        indexes = [
+            models.Index(fields=["file_hash"], name="edi_835_file_hash_idx"),
+            models.Index(
+                fields=["trace_number", "is_active"],
+                name="edi_835_trace_active_idx",
+            ),
+            models.Index(
+                fields=["isa13", "is_active"],
+                name="edi_835_isa13_active_idx",
+            ),
+        ]
+
+    def __str__(self):
+        return f"835 remittance #{self.pk} trace={self.trace_number}"
+
+
+class EDI835ClaimPaymentQuerySet(models.QuerySet):
+    def with_relations(self):
+        return self.select_related("remittance", "claim")
+
+
+class EDI835ClaimPayment(BaseModel):
+    """
+    One CLP claim payment/denial line from an 835.
+    Links to Claim when claim_number matches an active claim.
+    """
+
+    remittance = models.ForeignKey(
+        EDI835Remittance,
+        on_delete=models.CASCADE,
+        related_name="claim_payments",
+    )
+    claim = models.ForeignKey(
+        "claim.Claim",
+        on_delete=models.SET_NULL,
+        related_name="edi_835_payments",
+        null=True,
+        blank=True,
+    )
+    claim_number = models.CharField(
+        max_length=64,
+        help_text="CLP01 patient control / claim number.",
+    )
+    clp_status_code = models.CharField(
+        max_length=8,
+        help_text="CLP02 claim status code (1=paid primary, 4=denied, …).",
+    )
+    outcome = models.CharField(
+        max_length=32,
+        choices=RemittanceClaimOutcome.choices,
+        default=RemittanceClaimOutcome.IGNORED,
+    )
+    charge_amount = models.DecimalField(
+        max_digits=12, decimal_places=2, null=True, blank=True
+    )
+    payment_amount = models.DecimalField(
+        max_digits=12, decimal_places=2, null=True, blank=True
+    )
+    patient_responsibility = models.DecimalField(
+        max_digits=12, decimal_places=2, null=True, blank=True
+    )
+    payer_claim_control = models.CharField(
+        max_length=64,
+        null=True,
+        blank=True,
+        help_text="CLP07 payer claim control number when present.",
+    )
+    adjustment_codes = models.CharField(
+        max_length=500,
+        null=True,
+        blank=True,
+        help_text="Compact CAS group/reason codes from following CAS segments.",
+    )
+    prior_claim_status = models.CharField(max_length=32, null=True, blank=True)
+    status_applied = models.BooleanField(
+        default=False,
+        help_text="True when Claim.status was updated from this line.",
+    )
+    skip_reason = models.CharField(max_length=255, null=True, blank=True)
+    is_active = models.BooleanField(default=True)
+
+    objects = EDI835ClaimPaymentQuerySet.as_manager()
+
+    class Meta:
+        verbose_name = "EDI 835 Claim Payment"
+        verbose_name_plural = "EDI 835 Claim Payments"
+        ordering = ("id",)
+        constraints = [
+            models.UniqueConstraint(
+                fields=["remittance", "claim_number", "clp_status_code"],
+                condition=models.Q(is_active=True),
+                name="uniq_active_835_claim_line",
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=["claim_number", "is_active"],
+                name="edi_835_clm_num_active_idx",
+            ),
+            models.Index(
+                fields=["outcome", "status_applied"],
+                name="edi_835_outcome_applied_idx",
+            ),
+        ]
+
+    def __str__(self):
+        return f"835 CLP {self.claim_number} {self.outcome} #{self.pk}"
