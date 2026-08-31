@@ -4,7 +4,6 @@ import traceback
 from django.db import IntegrityError
 from django.db.models import Q
 from django.http import Http404
-from django.shortcuts import get_object_or_404
 from drf_spectacular.utils import (
     OpenApiExample,
     OpenApiParameter,
@@ -16,7 +15,13 @@ from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.core.soft_delete import hard_delete_permission_error, parse_hard_flag
+from apps.core.soft_delete import (
+    client_error_message,
+    get_active_object_or_404,
+    get_api_object_or_404,
+    hard_delete_permission_error,
+    parse_hard_flag,
+)
 
 from apps.claim.models import Claim, ClaimDocument
 from apps.claim.serializers import (
@@ -186,7 +191,7 @@ class ClaimDocumentListCreateAPIView(APIView):
 class ClaimDocumentDetailAPIView(APIView):
     def get(self, request, pk):
         try:
-            doc = get_object_or_404(ClaimDocument.objects.with_relations(), pk=pk)
+            doc = get_active_object_or_404(ClaimDocument.objects.with_relations(), pk=pk)
             return success_response(
                 "Claim document retrieved successfully.",
                 data=ClaimDocumentSerializer(doc).data,
@@ -213,7 +218,7 @@ class ClaimDocumentDetailAPIView(APIView):
 
     def _update(self, request, pk, partial):
         try:
-            doc = get_object_or_404(ClaimDocument.objects.with_relations(), pk=pk)
+            doc = get_active_object_or_404(ClaimDocument.objects.with_relations(), pk=pk)
             serializer = ClaimDocumentSerializer(
                 doc, data=request.data, partial=partial
             )
@@ -250,12 +255,12 @@ class ClaimDocumentDetailAPIView(APIView):
 
     def delete(self, request, pk):
         try:
-            doc = get_object_or_404(ClaimDocument.objects.with_relations(), pk=pk)
-            claim = doc.claim
             hard_delete = parse_hard_flag(request)
             denied = hard_delete_permission_error(request, hard_delete)
             if denied is not None:
                 return denied
+            doc = get_api_object_or_404(ClaimDocument.objects.with_relations(), pk=pk, hard=hard_delete)
+            claim = doc.claim
             if hard_delete:
                 doc_id = doc.id
                 doc.delete()
@@ -303,7 +308,7 @@ class ClaimDocumentStatusAPIView(APIView):
     @extend_schema(tags=[TAG], responses={200: dict})
     def get(self, request, pk):
         try:
-            claim = get_object_or_404(Claim.objects.all(), pk=pk)
+            claim = get_active_object_or_404(Claim.objects.all(), pk=pk)
             snapshot = sync_claim_document_status(claim)
             claim.refresh_from_db()
             return success_response(

@@ -3,7 +3,6 @@ import traceback
 
 from django.db import IntegrityError
 from django.http import Http404
-from django.shortcuts import get_object_or_404
 from drf_spectacular.utils import (
     OpenApiExample,
     OpenApiParameter,
@@ -15,7 +14,13 @@ from rest_framework.exceptions import NotFound, ValidationError
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.core.soft_delete import hard_delete_permission_error, parse_hard_flag
+from apps.core.soft_delete import (
+    client_error_message,
+    get_active_object_or_404,
+    get_api_object_or_404,
+    hard_delete_permission_error,
+    parse_hard_flag,
+)
 
 from apps.core.pagination import StandardPagination
 from apps.core.utils.responses import error_response, success_response
@@ -186,7 +191,7 @@ class LongDistanceRuleListCreateAPIView(APIView):
 class LongDistanceRuleDetailAPIView(APIView):
     def get(self, request, pk):
         try:
-            rule = get_object_or_404(LongDistanceRule, pk=pk)
+            rule = get_active_object_or_404(LongDistanceRule, pk=pk)
             return success_response(
                 "Long distance rule retrieved successfully.",
                 data=LongDistanceRuleSerializer(rule).data,
@@ -215,7 +220,7 @@ class LongDistanceRuleDetailAPIView(APIView):
 
     def _update(self, request, pk, partial):
         try:
-            rule = get_object_or_404(LongDistanceRule, pk=pk)
+            rule = get_active_object_or_404(LongDistanceRule, pk=pk)
             serializer = LongDistanceRuleSerializer(
                 rule,
                 data=request.data,
@@ -258,11 +263,11 @@ class LongDistanceRuleDetailAPIView(APIView):
 
     def delete(self, request, pk):
         try:
-            rule = get_object_or_404(LongDistanceRule, pk=pk)
             hard_delete = parse_hard_flag(request)
             denied = hard_delete_permission_error(request, hard_delete)
             if denied is not None:
                 return denied
+            rule = get_api_object_or_404(LongDistanceRule, pk=pk, hard=hard_delete)
 
             if hard_delete:
                 rule_id = rule.id

@@ -4,7 +4,6 @@ import traceback
 from django.db import IntegrityError
 from django.db.models import Q
 from django.http import Http404
-from django.shortcuts import get_object_or_404
 from drf_spectacular.utils import (
     OpenApiExample,
     OpenApiParameter,
@@ -16,7 +15,13 @@ from rest_framework.exceptions import NotFound, ValidationError
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.core.soft_delete import hard_delete_permission_error, parse_hard_flag
+from apps.core.soft_delete import (
+    client_error_message,
+    get_active_object_or_404,
+    get_api_object_or_404,
+    hard_delete_permission_error,
+    parse_hard_flag,
+)
 
 from apps.core.pagination import StandardPagination
 from apps.trading_partner.choices import Environment
@@ -204,7 +209,7 @@ class TradingPartnerListCreateAPIView(APIView):
 class TradingPartnerDetailAPIView(APIView):
     def get(self, request, pk):
         try:
-            partner = get_object_or_404(TradingPartner, pk=pk)
+            partner = get_active_object_or_404(TradingPartner, pk=pk)
             return success_response(
                 "Trading partner retrieved successfully.",
                 data=TradingPartnerSerializer(partner).data,
@@ -233,7 +238,7 @@ class TradingPartnerDetailAPIView(APIView):
 
     def _update(self, request, pk, partial):
         try:
-            partner = get_object_or_404(TradingPartner, pk=pk)
+            partner = get_active_object_or_404(TradingPartner, pk=pk)
             serializer = TradingPartnerSerializer(
                 partner,
                 data=request.data,
@@ -276,11 +281,11 @@ class TradingPartnerDetailAPIView(APIView):
 
     def delete(self, request, pk):
         try:
-            partner = get_object_or_404(TradingPartner, pk=pk)
             hard_delete = parse_hard_flag(request)
             denied = hard_delete_permission_error(request, hard_delete)
             if denied is not None:
                 return denied
+            partner = get_api_object_or_404(TradingPartner, pk=pk, hard=hard_delete)
 
             if hard_delete:
                 partner_id = partner.id

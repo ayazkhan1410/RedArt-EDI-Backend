@@ -4,7 +4,6 @@ import traceback
 from django.db import IntegrityError
 from django.db.models import Q, ProtectedError
 from django.http import Http404
-from django.shortcuts import get_object_or_404
 from drf_spectacular.utils import (
     OpenApiExample,
     OpenApiParameter,
@@ -16,7 +15,13 @@ from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.core.soft_delete import hard_delete_permission_error, parse_hard_flag
+from apps.core.soft_delete import (
+    client_error_message,
+    get_active_object_or_404,
+    get_api_object_or_404,
+    hard_delete_permission_error,
+    parse_hard_flag,
+)
 
 from apps.claim.utils.validators import parse_optional_int
 from apps.core.pagination import StandardPagination
@@ -194,7 +199,7 @@ class SFTPCredentialsListCreateAPIView(APIView):
 class SFTPCredentialsDetailAPIView(APIView):
     def get(self, request, pk):
         try:
-            row = get_object_or_404(
+            row = get_active_object_or_404(
                 SFTPCredentials.objects.with_relations(), pk=pk
             )
             return success_response(
@@ -223,7 +228,7 @@ class SFTPCredentialsDetailAPIView(APIView):
 
     def _update(self, request, pk, partial):
         try:
-            row = get_object_or_404(
+            row = get_active_object_or_404(
                 SFTPCredentials.objects.with_relations(), pk=pk
             )
             serializer = SFTPCredentialsSerializer(
@@ -259,13 +264,14 @@ class SFTPCredentialsDetailAPIView(APIView):
 
     def delete(self, request, pk):
         try:
-            row = get_object_or_404(
-                SFTPCredentials.objects.with_relations(), pk=pk
-            )
             hard_delete = parse_hard_flag(request)
             denied = hard_delete_permission_error(request, hard_delete)
             if denied is not None:
                 return denied
+            row = get_api_object_or_404(
+                SFTPCredentials.objects.with_relations(), pk=pk,
+                hard=hard_delete,
+            )
             if hard_delete:
                 if row.directories.filter(is_active=True).exists():
                     return error_response(
@@ -439,7 +445,7 @@ class SFTPDirectoryListCreateAPIView(APIView):
 class SFTPDirectoryDetailAPIView(APIView):
     def get(self, request, pk):
         try:
-            row = get_object_or_404(SFTPDirectory.objects.with_relations(), pk=pk)
+            row = get_active_object_or_404(SFTPDirectory.objects.with_relations(), pk=pk)
             return success_response(
                 "SFTP directory retrieved successfully.",
                 data=SFTPDirectorySerializer(row).data,
@@ -466,7 +472,7 @@ class SFTPDirectoryDetailAPIView(APIView):
 
     def _update(self, request, pk, partial):
         try:
-            row = get_object_or_404(SFTPDirectory.objects.with_relations(), pk=pk)
+            row = get_active_object_or_404(SFTPDirectory.objects.with_relations(), pk=pk)
             serializer = SFTPDirectorySerializer(
                 row, data=request.data, partial=partial
             )
@@ -500,11 +506,11 @@ class SFTPDirectoryDetailAPIView(APIView):
 
     def delete(self, request, pk):
         try:
-            row = get_object_or_404(SFTPDirectory.objects.with_relations(), pk=pk)
             hard_delete = parse_hard_flag(request)
             denied = hard_delete_permission_error(request, hard_delete)
             if denied is not None:
                 return denied
+            row = get_api_object_or_404(SFTPDirectory.objects.with_relations(), pk=pk, hard=hard_delete)
             if hard_delete:
                 row_id = row.id
                 row.delete()

@@ -6,10 +6,17 @@ import logging
 import traceback
 
 from django.http import Http404
-from django.shortcuts import get_object_or_404
 from drf_spectacular.utils import OpenApiExample, extend_schema
 from rest_framework import status
 from rest_framework.views import APIView
+
+from apps.core.soft_delete import (
+    client_error_message,
+    get_active_object_or_404,
+    get_api_object_or_404,
+    hard_delete_permission_error,
+    parse_hard_flag,
+)
 
 from apps.claim.models import Claim, SubmissionBatch
 from apps.claim.utils.service import (
@@ -69,7 +76,7 @@ class ClaimValidateAPIView(APIView):
     )
     def post(self, request, pk):
         try:
-            claim = get_object_or_404(Claim.objects.with_relations(), pk=pk)
+            claim = get_active_object_or_404(Claim.objects.with_relations(), pk=pk)
             data = validate_claim_for_edi(claim, update_status=True)
             return success_response("Claim validation complete.", data=data)
         except Http404:
@@ -93,7 +100,7 @@ class ClaimStatusAPIView(APIView):
     @extend_schema(tags=[TAG], responses={200: dict})
     def get(self, request, pk):
         try:
-            claim = get_object_or_404(Claim.objects.with_relations(), pk=pk)
+            claim = get_active_object_or_404(Claim.objects.with_relations(), pk=pk)
             data = get_claim_status_payload(claim)
             return success_response("Claim status retrieved.", data=data)
         except Http404:
@@ -102,7 +109,7 @@ class ClaimStatusAPIView(APIView):
                 status_code=status.HTTP_404_NOT_FOUND,
             )
         except ValueError as exc:
-            return error_response(str(exc), status_code=status.HTTP_400_BAD_REQUEST)
+            return error_response(client_error_message(exc), status_code=status.HTTP_400_BAD_REQUEST)
         except Exception:
             logger.error(
                 "Claim status id=%s failed:\n%s", pk, traceback.format_exc()
@@ -119,7 +126,7 @@ class SubmissionBatchStatusAPIView(APIView):
     @extend_schema(tags=[BATCH_TAG], responses={200: dict})
     def get(self, request, pk):
         try:
-            batch = get_object_or_404(
+            batch = get_active_object_or_404(
                 SubmissionBatch.objects.select_related("trading_partner"),
                 pk=pk,
             )
@@ -131,7 +138,7 @@ class SubmissionBatchStatusAPIView(APIView):
                 status_code=status.HTTP_404_NOT_FOUND,
             )
         except ValueError as exc:
-            return error_response(str(exc), status_code=status.HTTP_400_BAD_REQUEST)
+            return error_response(client_error_message(exc), status_code=status.HTTP_400_BAD_REQUEST)
         except Exception:
             logger.error(
                 "Batch status id=%s failed:\n%s", pk, traceback.format_exc()
