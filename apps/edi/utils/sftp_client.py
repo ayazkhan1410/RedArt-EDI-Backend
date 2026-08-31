@@ -155,7 +155,13 @@ def download_bytes_via_sftp(*, credentials, remote_path) -> bytes:
 def _load_private_key(pem, passphrase):
     if not pem:
         raise ValueError("private_key_pem is required.")
-    raw = pem.encode("utf-8") if isinstance(pem, str) else pem
+    # Paramiko 3.x expects a text file-like for PEM strings (BytesIO breaks).
+    if isinstance(pem, str):
+        stream = io.StringIO(pem)
+    elif isinstance(pem, (bytes, bytearray)):
+        stream = io.StringIO(pem.decode("utf-8"))
+    else:
+        stream = pem
     password = passphrase.encode("utf-8") if passphrase else None
     for loader in (
         paramiko.RSAKey.from_private_key,
@@ -163,7 +169,8 @@ def _load_private_key(pem, passphrase):
         paramiko.Ed25519Key.from_private_key,
     ):
         try:
-            return loader(io.BytesIO(raw), password=password)
+            stream.seek(0)
+            return loader(stream, password=password)
         except Exception:
             continue
     raise ValueError("Unable to load private key PEM.")

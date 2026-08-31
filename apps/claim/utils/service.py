@@ -170,6 +170,260 @@ def assert_claim_ready_for_batch(claim):
     return snapshot
 
 
+def validate_claim_for_edi(claim, *, update_status=True):
+    """
+    Handoff-style readiness check for RedArt.
+    Returns {"ready": bool, "errors": [str, ...], ...} without raising.
+    """
+    if claim is None:
+        return {
+            "ready": False,
+            "errors": ["Claim not found."],
+            "warnings": [],
+            "claim_id": None,
+            "status": None,
+        }
+
+    claim = (
+        Claim.objects.with_relations()
+        .filter(pk=getattr(claim, "pk", claim), is_active=True)
+        .first()
+    )
+    if claim is None:
+        return {
+            "ready": False,
+            "errors": ["Claim not found or inactive."],
+            "warnings": [],
+            "claim_id": None,
+            "status": None,
+        }
+
+    errors = []
+    warnings = []
+
+    if update_status:
+        sync_claim_document_status(claim)
+        claim.refresh_from_db()
+
+    snapshot = evaluate_claim_documents(claim)
+    if not snapshot["can_submit"]:
+        for doc_type in snapshot.get("missing_types") or []:
+            errors.append(f"Required document missing: {doc_type}")
+        for doc_type in snapshot.get("incomplete_types") or []:
+            errors.append(f"Required document incomplete/unsigned: {doc_type}")
+        if not errors:
+            errors.append("Supporting documents incomplete for long-distance claim.")
+
+    if not claim.diagnosis_code:
+        errors.append("Diagnosis code missing.")
+    if not claim.place_of_service:
+        errors.append("Place of service missing.")
+    if claim.total_charge is None:
+        warnings.append("Total charge is empty (will use service-line sum when present).")
+
+    trip = claim.trip
+    if trip is None:
+        errors.append("Claim is missing trip.")
+    else:
+        if not trip.service_date:
+            errors.append("Trip service date missing.")
+        patient = trip.patient
+        if patient is None:
+            errors.append("Trip is missing patient.")
+        else:
+            if not patient.medicaid_member_id:
+                errors.append("Medicaid member ID missing.")
+            if not patient.has_837p_demographics():
+                errors.append(
+                    "Patient demographics incomplete "
+                    "(gender, address_line_1, city, state, zip)."
+                )
+        provider = trip.provider
+        if provider is None:
+            errors.append("Trip is missing billing provider.")
+        elif not provider.npi:
+            errors.append("Provider NPI missing.")
+
+    if not claim.service_lines.filter(is_active=True).exists():
+        errors.append("Claim has no active service lines.")
+
+    ready = len(errors) == 0
+    if (
+        update_status
+        and ready
+        and claim.status
+        in (
+            ClaimStatus.DRAFT,
+            ClaimStatus.DOCUMENTS_REQUIRED,
+            ClaimStatus.DOCUMENTS_COMPLETE,
+            None,
+            "",
+        )
+    ):
+        claim.status = ClaimStatus.READY_FOR_837P
+        claim.save(update_fields=["status", "updated_at"])
+        claim.refresh_from_db()
+
+    return {
+        "ready": ready,
+        "errors": errors,
+        "warnings": warnings,
+        "claim_id": claim.id,
+        "claim_number": claim.claim_number,
+        "external_id": claim.external_id,
+        "status": claim.status,
+        "attachment_required": claim.attachment_required,
+        "attachment_status": claim.attachment_status,
+        "document_snapshot": {
+            "can_submit": snapshot["can_submit"],
+            "documents_complete": snapshot["documents_complete"],
+            "required_types": snapshot.get("required_types") or [],
+            "missing_types": snapshot.get("missing_types") or [],
+            "incomplete_types": snapshot.get("incomplete_types") or [],
+        },
+    }
+
+
+def get_claim_status_payload(claim):
+    """Aggregate claim + latest batch / EDI file / 999 for RedArt UI."""
+    from apps.edi.models import EDIAcknowledgement, EDIFile
+
+    claim = (
+        Claim.objects.with_relations()
+        .filter(pk=getattr(claim, "pk", claim), is_active=True)
+        .first()
+    )
+    if claim is None:
+        raise ValueError("Claim not found or inactive.")
+
+    readiness = validate_claim_for_edi(claim, update_status=False)
+
+    batch_row = (
+        BatchClaim.objects.select_related("batch", "batch__trading_partner")
+        .filter(claim_id=claim.id, is_active=True)
+        .order_by("-id")
+        .first()
+    )
+    batch_data = None
+    edi_data = None
+    ack_data = None
+    if batch_row and batch_row.batch_id:
+        batch = batch_row.batch
+        batch_data = {
+            "id": batch.id,
+            "batch_number": batch.batch_number,
+            "status": batch.status,
+            "environment": batch.environment,
+            "st02": batch_row.st02,
+            "trading_partner_id": batch.trading_partner_id,
+        }
+        edi = (
+            EDIFile.objects.filter(batch_id=batch.id, is_active=True)
+            .order_by("-id")
+            .first()
+        )
+        if edi is not None:
+            edi_data = {
+                "id": edi.id,
+                "filename": edi.filename,
+                "status": edi.status,
+                "uploaded_at": edi.uploaded_at,
+            }
+        ack = (
+            EDIAcknowledgement.objects.filter(
+                batch_id=batch.id,
+                is_active=True,
+            )
+            .order_by("-id")
+            .first()
+        )
+        if ack is not None:
+            ack_data = {
+                "id": ack.id,
+                "ack_type": ack.ack_type,
+                "status": ack.status,
+                "affected_st02": ack.affected_st02,
+                "message": ack.message,
+                "acknowledged_at": ack.acknowledged_at,
+            }
+
+    return {
+        "claim_id": claim.id,
+        "claim_number": claim.claim_number,
+        "external_id": claim.external_id,
+        "status": claim.status,
+        "attachment_required": claim.attachment_required,
+        "attachment_status": claim.attachment_status,
+        "total_charge": str(claim.total_charge) if claim.total_charge is not None else None,
+        "ready": readiness["ready"],
+        "errors": readiness["errors"],
+        "batch": batch_data,
+        "edi_file": edi_data,
+        "acknowledgement": ack_data,
+        "updated_at": claim.updated_at,
+    }
+
+
+def get_batch_status_payload(batch):
+    """Aggregate batch status for RedArt UI."""
+    from apps.edi.models import EDIAcknowledgement, EDIFile
+
+    batch = (
+        SubmissionBatch.objects.select_related("trading_partner")
+        .filter(pk=getattr(batch, "pk", batch), is_active=True)
+        .first()
+    )
+    if batch is None:
+        raise ValueError("Batch not found or inactive.")
+
+    rows = list(
+        BatchClaim.objects.select_related("claim")
+        .filter(batch_id=batch.id, is_active=True)
+        .order_by("id")
+    )
+    edi_files = list(
+        EDIFile.objects.filter(batch_id=batch.id, is_active=True)
+        .order_by("-id")
+        .values("id", "filename", "status", "uploaded_at")[:10]
+    )
+    acks = list(
+        EDIAcknowledgement.objects.filter(batch_id=batch.id, is_active=True)
+        .order_by("-id")
+        .values(
+            "id",
+            "ack_type",
+            "status",
+            "affected_st02",
+            "message",
+            "acknowledged_at",
+        )[:10]
+    )
+
+    return {
+        "batch_id": batch.id,
+        "batch_number": batch.batch_number,
+        "status": batch.status,
+        "environment": batch.environment,
+        "claim_count": batch.claim_count,
+        "total_amount": str(batch.total_amount)
+        if batch.total_amount is not None
+        else None,
+        "trading_partner_id": batch.trading_partner_id,
+        "claims": [
+            {
+                "claim_id": row.claim_id,
+                "claim_number": row.claim.claim_number if row.claim_id else None,
+                "claim_status": row.claim.status if row.claim_id else None,
+                "st02": row.st02,
+            }
+            for row in rows
+        ],
+        "edi_files": edi_files,
+        "acknowledgements": acks,
+        "updated_at": batch.updated_at,
+    }
+
+
 def refresh_batch_totals(batch):
     """Recompute claim_count and total_amount from active BatchClaim rows."""
     if batch is None:

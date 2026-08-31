@@ -16,9 +16,19 @@ CORS_ALLOW_ALL_ORIGINS = env.bool("CORS_ALLOW_ALL_ORIGINS", default=True)
 
 EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
 
-REST_FRAMEWORK = {
-    **REST_FRAMEWORK,
-    "DEFAULT_PERMISSION_CLASSES": [
-        "rest_framework.permissions.AllowAny",
-    ],
-}
+# Local/Docker default: open for Swagger demos. Set API_REQUIRE_AUTH=true to
+# enforce JWT/session like production (RedArt must send Bearer token).
+if env.bool("API_REQUIRE_AUTH", default=False):
+    REST_FRAMEWORK = {
+        **REST_FRAMEWORK,
+        "DEFAULT_PERMISSION_CLASSES": [
+            "rest_framework.permissions.IsAuthenticated",
+        ],
+    }
+else:
+    REST_FRAMEWORK = {
+        **REST_FRAMEWORK,
+        "DEFAULT_PERMISSION_CLASSES": [
+            "rest_framework.permissions.AllowAny",
+        ],
+    }

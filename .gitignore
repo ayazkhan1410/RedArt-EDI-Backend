@@ -9,6 +9,9 @@ ENV/
 .env.local
 .env.*.local
 !.env.example
+*.pem
+privateKey.pem
+**/privateKey.pem
 
 # Python
 __pycache__/
