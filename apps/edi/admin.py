@@ -3,6 +3,7 @@ from django.contrib import admin
 from apps.edi.models import (
     EDI999Import,
     EDI835ClaimPayment,
+    EDI835Import,
     EDI835Remittance,
     EDIAcknowledgement,
     EDIControlNumber,
@@ -194,6 +195,31 @@ class EDI999ImportAdmin(admin.ModelAdmin):
         "edi_file",
         "acknowledgement",
     )
+    readonly_fields = ("id", "created_at", "updated_at", "started_at", "finished_at")
+
+
+@admin.register(EDI835Import)
+class EDI835ImportAdmin(admin.ModelAdmin):
+    list_display = (
+        "id",
+        "filename",
+        "status",
+        "credentials",
+        "remittance",
+        "attempt",
+        "celery_task_id",
+        "is_active",
+        "created_at",
+    )
+    list_filter = ("status", "is_active")
+    search_fields = (
+        "filename",
+        "remote_path",
+        "file_hash",
+        "celery_task_id",
+        "message",
+    )
+    autocomplete_fields = ("credentials", "directory", "remittance")
     readonly_fields = ("id", "created_at", "updated_at", "started_at", "finished_at")
 
 

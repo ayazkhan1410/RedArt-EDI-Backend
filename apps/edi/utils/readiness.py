@@ -81,11 +81,35 @@ def assert_batch_ready_for_837p_generation(batch):
             raise ValueError(
                 f"Provider {provider.id} is missing NPI required for 837P."
             )
+        if not (provider.taxonomy_code or "").strip():
+            raise ValueError(
+                f"Provider {provider.id} is missing taxonomy_code "
+                "(required for Colorado 837P billing provider identity)."
+            )
+
+        medicaid_id = (patient.medicaid_member_id or "").strip()
+        if not medicaid_id:
+            raise ValueError(
+                f"Patient {patient.id} is missing medicaid_member_id "
+                "(NM1*IL member ID required for 837P)."
+            )
 
         if not claim.service_lines.filter(is_active=True).exists():
             raise ValueError(
                 f"Claim {claim.claim_number or claim.id} has no active service lines."
             )
+
+        for line in claim.service_lines.filter(is_active=True):
+            if not (line.procedure_code or "").strip():
+                raise ValueError(
+                    f"Claim {claim.claim_number or claim.id} has a service line "
+                    "without procedure_code."
+                )
+            if line.charge is None:
+                raise ValueError(
+                    f"Claim {claim.claim_number or claim.id} has a service line "
+                    "without charge."
+                )
 
     return True
 

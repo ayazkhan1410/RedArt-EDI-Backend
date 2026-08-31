@@ -24,4 +24,9 @@ app.conf.beat_schedule = {
         # Every hour at :00
         "schedule": crontab(minute=0),
     },
+    "poll-edi-835-imports-hourly": {
+        "task": "apps.edi.tasks.poll_edi_835_imports",
+        # Every hour at :15 (offset from 999)
+        "schedule": crontab(minute=15),
+    },
 }

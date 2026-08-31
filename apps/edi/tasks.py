@@ -7,11 +7,15 @@ import logging
 from celery import shared_task
 from celery.exceptions import MaxRetriesExceededError
 
-from apps.edi.choices import EDI999ImportStatus, EDIFileStatus
-from apps.edi.models import EDI999Import
+from apps.edi.choices import EDI999ImportStatus, EDI835ImportStatus, EDIFileStatus
+from apps.edi.models import EDI999Import, EDI835Import
 from apps.edi.utils.import_999 import (
     process_edi_999_import,
     queue_edi_999_import_poll,
+)
+from apps.edi.utils.import_835_poll import (
+    process_edi_835_import,
+    queue_edi_835_import_poll,
 )
 from apps.edi.utils.upload import queue_edi_file_upload, run_edi_file_upload
 
@@ -20,6 +24,7 @@ logger = logging.getLogger(__name__)
 # First try is immediate (countdown 0). After each failure: 60s, 180s, 360s.
 UPLOAD_RETRY_COUNTDOWNS = (60, 180, 360)
 IMPORT_999_RETRY_COUNTDOWNS = (60, 180, 360)
+IMPORT_835_RETRY_COUNTDOWNS = (60, 180, 360)
 
 
 @shared_task(
@@ -215,3 +220,101 @@ def process_edi_999_import_task(self, import_id, batch_id=None):
             countdown=countdown,
             args=(import_id, batch_id),
         )
+
+
+@shared_task(
+    bind=True,
+    name="apps.edi.tasks.poll_edi_835_imports",
+    acks_late=True,
+)
+def poll_edi_835_imports(self, credentials_id=None):
+    """Hourly (or manual) poller for inbound 835 ERA files on SFTP."""
+    logger.info(
+        "Celery poll_edi_835_imports start credentials_id=%s task=%s",
+        credentials_id,
+        self.request.id,
+    )
+    result = queue_edi_835_import_poll(credentials_id=credentials_id)
+    logger.info("Celery poll_edi_835_imports done %s", result)
+    return result
+
+
+@shared_task(
+    bind=True,
+    name="apps.edi.tasks.process_edi_835_import_task",
+    max_retries=3,
+    acks_late=True,
+)
+def process_edi_835_import_task(self, import_id):
+    """Download one remote 835, parse, apply PAID/DENIED via remittance import."""
+    logger.info(
+        "Celery process_edi_835_import start id=%s task=%s retries=%s",
+        import_id,
+        self.request.id,
+        self.request.retries,
+    )
+    try:
+        EDI835Import.objects.filter(pk=import_id).update(
+            celery_task_id=self.request.id,
+            attempt=self.request.retries + 1,
+        )
+        result = process_edi_835_import(import_id)
+        status_value = result.get("status")
+        if status_value in (
+            EDI835ImportStatus.IMPORTED,
+            EDI835ImportStatus.SKIPPED,
+        ):
+            logger.info("Celery process_edi_835_import done %s", result)
+            return result
+        raise RuntimeError(
+            f"Import 835 did not complete: status={status_value} "
+            f"message={result.get('message')}"
+        )
+    except MaxRetriesExceededError:
+        logger.exception(
+            "Celery process_edi_835_import exhausted retries id=%s",
+            import_id,
+        )
+        raise
+    except Exception as exc:
+        row = EDI835Import.objects.filter(pk=import_id).first()
+        if row and row.status == EDI835ImportStatus.SKIPPED:
+            return {
+                "id": import_id,
+                "status": row.status,
+                "message": row.message,
+            }
+        if self.request.retries >= self.max_retries:
+            logger.exception(
+                "Celery process_edi_835_import giving up id=%s err=%s",
+                import_id,
+                exc,
+            )
+            raise
+
+        countdown = IMPORT_835_RETRY_COUNTDOWNS[self.request.retries]
+        if row:
+            row.status = EDI835ImportStatus.QUEUED
+            row.message = (
+                f"Auto-retry scheduled in {countdown}s "
+                f"(celery retry {self.request.retries + 1}/{self.max_retries})."
+            )[:500]
+            row.celery_task_id = self.request.id
+            row.save(
+                update_fields=[
+                    "status",
+                    "message",
+                    "celery_task_id",
+                    "updated_at",
+                ]
+            )
+
+        logger.warning(
+            "Celery process_edi_835_import retry id=%s retry=%s/%s countdown=%ss err=%s",
+            import_id,
+            self.request.retries + 1,
+            self.max_retries,
+            countdown,
+            exc,
+        )
+        raise self.retry(exc=exc, countdown=countdown, args=(import_id,))

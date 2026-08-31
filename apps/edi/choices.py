@@ -62,6 +62,10 @@ class EDI999ImportStatus(models.TextChoices):
     SKIPPED = "SKIPPED", "Skipped"
 
 
+# Same lifecycle as 999 import tracking (SFTP discover → parse → apply).
+EDI835ImportStatus = EDI999ImportStatus
+
+
 class SFTPAuthType(models.TextChoices):
     PASSWORD = "PASSWORD", "Password"
     PRIVATE_KEY = "PRIVATE_KEY", "Private key"

@@ -6,6 +6,11 @@ from apps.edi.ack_views import (
     EDIAcknowledgementImport999APIView,
     EDIAcknowledgementListCreateAPIView,
 )
+from apps.edi.import_835_views import (
+    EDI835ImportDetailAPIView,
+    EDI835ImportListAPIView,
+    EDI835ImportPollAPIView,
+)
 from apps.edi.import_999_views import (
     EDI999ImportDetailAPIView,
     EDI999ImportListAPIView,
@@ -121,6 +126,21 @@ urlpatterns = [
         "edi-835-remittances/<int:pk>/",
         EDI835RemittanceDetailAPIView.as_view(),
         name="edi-835-remittance-detail",
+    ),
+    path(
+        "edi-835-imports/",
+        EDI835ImportListAPIView.as_view(),
+        name="edi-835-import-list",
+    ),
+    path(
+        "edi-835-imports/poll/",
+        EDI835ImportPollAPIView.as_view(),
+        name="edi-835-import-poll",
+    ),
+    path(
+        "edi-835-imports/<int:pk>/",
+        EDI835ImportDetailAPIView.as_view(),
+        name="edi-835-import-detail",
     ),
     path(
         "edi-acknowledgements/<int:pk>/",

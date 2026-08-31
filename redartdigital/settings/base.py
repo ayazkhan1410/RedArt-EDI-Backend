@@ -176,6 +176,10 @@ SIMPLE_JWT = {
 EDI_API_SERVICE_USERNAME = env("EDI_API_SERVICE_USERNAME", default="")
 EDI_API_SERVICE_EMAIL = env("EDI_API_SERVICE_EMAIL", default="")
 
+# Comma-separated override for HCPF designated rural counties (125-mile threshold).
+# Empty → use seeded list in apps.long_distance_rule.utils.counties.
+EDI_RURAL_COUNTIES = env("EDI_RURAL_COUNTIES", default="")
+
 # Public TEST/PROD API base URL shared with RedArt / Lovable (no trailing slash).
 # Example: https://redart-edi-test.onrender.com
 EDI_PUBLIC_BASE_URL = env("EDI_PUBLIC_BASE_URL", default="").rstrip("/")

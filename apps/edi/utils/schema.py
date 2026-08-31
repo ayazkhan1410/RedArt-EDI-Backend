@@ -307,7 +307,7 @@ def build_edi_content(payload):
                     charge,
                     "UN",
                     units,
-                    "",
+                    pos,
                     "",
                     "1",
                 )

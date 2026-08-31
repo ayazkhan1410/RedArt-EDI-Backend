@@ -10,6 +10,7 @@ from apps.edi.choices import (
 from apps.edi.models import (
     EDI999Import,
     EDI835ClaimPayment,
+    EDI835Import,
     EDI835Remittance,
     EDIAcknowledgement,
     EDIControlNumber,
@@ -645,3 +646,60 @@ class EDI835RemittanceListSerializer(serializers.ModelSerializer):
 
 class EDI835RemittanceIdSerializer(serializers.Serializer):
     id = serializers.IntegerField(read_only=True)
+
+
+class EDI835ImportSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = EDI835Import
+        fields = (
+            "id",
+            "credentials",
+            "directory",
+            "remittance",
+            "filename",
+            "remote_path",
+            "file_hash",
+            "status",
+            "attempt",
+            "celery_task_id",
+            "message",
+            "detail",
+            "started_at",
+            "finished_at",
+            "is_active",
+            "created_at",
+            "updated_at",
+        )
+        read_only_fields = fields
+
+
+class EDI835ImportListSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = EDI835Import
+        fields = (
+            "id",
+            "credentials",
+            "directory",
+            "remittance",
+            "filename",
+            "remote_path",
+            "file_hash",
+            "status",
+            "attempt",
+            "celery_task_id",
+            "message",
+            "started_at",
+            "finished_at",
+            "is_active",
+            "created_at",
+        )
+        read_only_fields = fields
+
+
+class PollEDI835ImportsSerializer(serializers.Serializer):
+    credentials_id = serializers.IntegerField(required=False, allow_null=True)
+    async_mode = serializers.BooleanField(
+        required=False,
+        default=True,
+        help_text="If true, enqueue Celery poll_edi_835_imports; else run discover+queue inline.",
+    )

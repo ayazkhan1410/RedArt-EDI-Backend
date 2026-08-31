@@ -121,11 +121,11 @@ Do **not** re-decide `attachment_required` after 999 — set at rules stage and 
 
 ## Next to build
 
-1. Populate rural counties (or county table) so DESIGNATED_RURAL actually applies  
-2. Live attachment channel + stronger TR3 / 835 as needed  
-3. Confirm HCPF 999 pickup on FromEdifecs after real submissions  
+1. Deploy TEST API URL (Render) + hand off credentials  
+2. Confirm HCPF 999 after real upload  
+3. HCPF-approved attachment transport (PDF steps 6–7) when they answer  
 
-**Done for RedArt handoff:** JWT (`POST /api/v1/auth/token/`), service user (`create_api_service_user`), samples in `docs/REDART_API_SAMPLES.md`, claim validate/status APIs, **835 import** (`POST /api/v1/edi-835-remittances/import/` → PAID/DENIED).
+**Done recently:** rural county seed (125), 835 SFTP poll, 837P readiness/SV1 POS, production HTTPS proxy flags, Lovable catalog.
 
 Patient demographics (gender/address) and `EDI_ENVELOPE` settings are in place.  
 Use `apps.edi.utils.readiness.assert_batch_ready_for_837p_generation` before generate.

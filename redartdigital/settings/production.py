@@ -11,10 +11,18 @@ ALLOWED_HOSTS = env.list("DJANGO_ALLOWED_HOSTS")
 if not ALLOWED_HOSTS:
     raise RuntimeError("DJANGO_ALLOWED_HOSTS must be set in production.")
 
+# TLS terminates at the reverse proxy / load balancer (Render, nginx, ALB).
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+USE_X_FORWARDED_HOST = True
+USE_X_FORWARDED_PORT = True
 SECURE_SSL_REDIRECT = env("DJANGO_SECURE_SSL_REDIRECT")
+# Allow plain-HTTP health probes against the container (proxy still uses HTTPS).
+SECURE_REDIRECT_EXEMPT = [r"^api/health/?$"]
+
 SESSION_COOKIE_SECURE = True
 CSRF_COOKIE_SECURE = True
+SESSION_COOKIE_SAMESITE = env("DJANGO_SESSION_COOKIE_SAMESITE", default="Lax")
+CSRF_COOKIE_SAMESITE = env("DJANGO_CSRF_COOKIE_SAMESITE", default="Lax")
 SECURE_HSTS_SECONDS = env("DJANGO_SECURE_HSTS_SECONDS")
 SECURE_HSTS_INCLUDE_SUBDOMAINS = True
 SECURE_HSTS_PRELOAD = True
