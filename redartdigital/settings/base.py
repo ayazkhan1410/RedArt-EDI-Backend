@@ -151,6 +151,9 @@ REST_FRAMEWORK = {
     "DEFAULT_PERMISSION_CLASSES": [
         "rest_framework.permissions.IsAuthenticated",
     ],
+    "DEFAULT_THROTTLE_RATES": {
+        "auth_burst": env("API_AUTH_THROTTLE", default="20/min"),
+    },
 }
 
 # RedArt server-to-server auth (obtain via POST /api/v1/auth/token/).
@@ -164,7 +167,15 @@ SIMPLE_JWT = {
     "ROTATE_REFRESH_TOKENS": False,
     "UPDATE_LAST_LOGIN": True,
     "AUTH_HEADER_TYPES": ("Bearer",),
+    "AUTH_HEADER_NAME": "HTTP_AUTHORIZATION",
+    "USER_ID_FIELD": "id",
+    "USER_ID_CLAIM": "user_id",
 }
+
+# Optional bootstrap values for create_api_service_user / entrypoint.
+EDI_API_SERVICE_USERNAME = env("EDI_API_SERVICE_USERNAME", default="")
+EDI_API_SERVICE_EMAIL = env("EDI_API_SERVICE_EMAIL", default="")
+
 
 SPECTACULAR_SETTINGS = {
     "TITLE": "RedArt EDI API",
