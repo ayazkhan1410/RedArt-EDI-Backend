@@ -18,3 +18,6 @@ CSRF_TRUSTED_ORIGINS = env.list(
 
 # Terminate TLS at a reverse proxy in real deployments.
 SECURE_SSL_REDIRECT = env.bool("DJANGO_SECURE_SSL_REDIRECT", default=False)
+
+# Inside Compose, MinIO is reachable by service name.
+AWS_S3_ENDPOINT_URL = env("AWS_S3_ENDPOINT_URL", default="http://minio:9000")

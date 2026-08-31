@@ -12,21 +12,52 @@ All other models get at least 5 demo rows (idempotent via known keys).
 from datetime import date, timedelta
 from decimal import Decimal
 
+from django.conf import settings
 from django.core.management.base import BaseCommand
 from django.db import transaction
 
-from apps.claim.choices import BatchStatus, ClaimStatus, DocumentStatus, DocumentType
-from apps.claim.models import BatchClaim, Claim, ClaimDocument, SubmissionBatch
+from apps.claim.choices import (
+    AttachmentRoute,
+    AttachmentSubmissionStatus,
+    BatchStatus,
+    ClaimStatus,
+    DocumentStatus,
+    DocumentType,
+)
+from apps.claim.models import (
+    AttachmentSubmission,
+    BatchClaim,
+    Claim,
+    ClaimDocument,
+    SubmissionBatch,
+)
 from apps.claim.utils.service import (
     add_claim_to_batch,
     apply_long_distance_flags,
     refresh_batch_totals,
     sync_claim_document_status,
+    sync_claim_from_attachment_submission,
 )
 from apps.claim_service_line.models import ClaimServiceLine
-from apps.edi.choices import EDIFileStatus, SFTPAuthType, SFTPDirectoryPurpose
-from apps.edi.models import EDIControlNumber, EDIFile, SFTPCredentials, SFTPDirectory
-from apps.edi.utils.service import create_edi_file_for_batch, mark_edi_file_uploaded
+from apps.edi.choices import (
+    AcknowledgementStatus,
+    AcknowledgementType,
+    EDIFileStatus,
+    SFTPAuthType,
+    SFTPDirectoryPurpose,
+)
+from apps.edi.models import (
+    EDIAcknowledgement,
+    EDIControlNumber,
+    EDIFile,
+    SFTPCredentials,
+    SFTPDirectory,
+)
+from apps.edi.utils.service import (
+    apply_edi_acknowledgement,
+    create_edi_file_for_batch,
+    mark_edi_file_uploaded,
+)
 from apps.long_distance_rule.models import LongDistanceRule
 from apps.nemt_trip.models import NemtTrip
 from apps.patient.models import Patient
@@ -62,7 +93,13 @@ class Command(BaseCommand):
         docs = self._seed_documents(claims)
         batches, batch_claims = self._seed_batches(partners, claims)
         controls, edi_files = self._seed_edi(batches)
+        acks = self._seed_acknowledgements(batches, batch_claims, edi_files)
+        attachments = self._seed_attachment_submissions(claims)
         sftp_creds, sftp_dirs = self._seed_sftp(partners)
+        env_cred, env_dirs = self._seed_sftp_from_env(partners)
+        if env_cred:
+            sftp_creds.append(env_cred)
+            sftp_dirs.extend(env_dirs)
 
         self.stdout.write(self.style.SUCCESS("Demo seed complete:"))
         self.stdout.write(f"  TradingPartner:          {len(partners)}")
@@ -75,10 +112,12 @@ class Command(BaseCommand):
         self.stdout.write(f"  Claim:                   {len(claims)}")
         self.stdout.write(f"  ClaimServiceLine:        {len(lines)}")
         self.stdout.write(f"  ClaimDocument:           {len(docs)}")
+        self.stdout.write(f"  AttachmentSubmission:    {len(attachments)}")
         self.stdout.write(f"  SubmissionBatch:         {len(batches)}")
         self.stdout.write(f"  BatchClaim:              {len(batch_claims)}")
         self.stdout.write(f"  EDIControlNumber:        {len(controls)}")
         self.stdout.write(f"  EDIFile:                 {len(edi_files)}")
+        self.stdout.write(f"  EDIAcknowledgement:      {len(acks)}")
         self.stdout.write(f"  SFTPCredentials:         {len(sftp_creds)}")
         self.stdout.write(f"  SFTPDirectory:           {len(sftp_dirs)}")
 
@@ -87,6 +126,12 @@ class Command(BaseCommand):
             credentials__name__startswith="DEMO-SFTP-"
         ).delete()
         SFTPCredentials.objects.filter(name__startswith="DEMO-SFTP-").delete()
+        seed_name = getattr(settings, "SFTP_SEED_NAME", "SEED-SFTP-CLOUD")
+        SFTPDirectory.objects.filter(credentials__name=seed_name).delete()
+        SFTPCredentials.objects.filter(name=seed_name).delete()
+        EDIAcknowledgement.objects.filter(
+            batch__batch_number__startswith="DEMO-"
+        ).delete()
         EDIFile.objects.filter(batch__batch_number__startswith="DEMO-").delete()
         EDIControlNumber.objects.filter(
             batch__batch_number__startswith="DEMO-"
@@ -95,6 +140,9 @@ class Command(BaseCommand):
             batch__batch_number__startswith="DEMO-"
         ).delete()
         SubmissionBatch.objects.filter(batch_number__startswith="DEMO-").delete()
+        AttachmentSubmission.objects.filter(
+            claim__claim_number__startswith="DEMO-"
+        ).delete()
         ClaimDocument.objects.filter(
             claim__claim_number__startswith="DEMO-"
         ).delete()
@@ -127,8 +175,8 @@ class Command(BaseCommand):
 
     def _seed_trading_partners(self):
         rows = [
-            ("Colorado Medicaid TEST", "DEMO-TP001", "COMEDASSISTPROG", "TEST"),
-            ("Colorado Medicaid PROD", "DEMO-TP002", "COMEDASSISTPROG", "PRODUCTION"),
+            ("RedArt DEMO", "DEMO-TP001", "COMEDASSISTPROG", "TEST"),
+            ("RedArt DEMO PROD", "DEMO-TP002", "COMEDASSISTPROG", "PRODUCTION"),
             ("Demo Clearinghouse A", "DEMO-TP003", "CLEARHOUSEA", "TEST"),
             ("Demo Clearinghouse B", "DEMO-TP004", "CLEARHOUSEB", "TEST"),
             ("Demo Backup TP", "DEMO-TP005", "BACKUPRECV", "TEST"),
@@ -325,6 +373,14 @@ class Command(BaseCommand):
                     },
                 )
                 lines.append(extra)
+            # Keep claim.total_charge aligned with active service lines (CLM02).
+            line_sum = sum(
+                (ln.charge or Decimal("0") for ln in claim.service_lines.filter(is_active=True)),
+                Decimal("0"),
+            )
+            if claim.total_charge != line_sum:
+                claim.total_charge = line_sum
+                claim.save(update_fields=["total_charge", "updated_at"])
         return lines
 
     def _seed_documents(self, claims):
@@ -474,6 +530,65 @@ class Command(BaseCommand):
                 continue
         return controls, files
 
+    def _seed_acknowledgements(self, batches, batch_claims, edi_files):
+        acks = []
+        if not batches or not batch_claims:
+            return acks
+        batch = batches[0]
+        row = next((bc for bc in batch_claims if bc.batch_id == batch.id), None)
+        if row is None:
+            return acks
+        edi_file = next((f for f in edi_files if f.batch_id == batch.id), None)
+        existing = EDIAcknowledgement.objects.filter(
+            batch=batch,
+            affected_st02=row.st02,
+            ack_type=AcknowledgementType.X999,
+            is_active=True,
+        ).first()
+        if existing:
+            acks.append(existing)
+            return acks
+        ack, _ = apply_edi_acknowledgement(
+            batch_id=batch.id,
+            ack_type=AcknowledgementType.X999,
+            status=AcknowledgementStatus.ACCEPTED,
+            affected_st02=row.st02 or "0001",
+            raw_file_ref=f"s3://edi/999_{batch.batch_number}.edi",
+            edi_file_id=edi_file.id if edi_file else None,
+            message="Demo 999 accepted (not payment).",
+            apply_claim_status=True,
+        )
+        acks.append(ack)
+        return acks
+
+    def _seed_attachment_submissions(self, claims):
+        rows = []
+        ld_claims = [c for c in claims if c.attachment_required]
+        for i, claim in enumerate(ld_claims[:5]):
+            ref = f"HCPF-ATT-DEMO-{i + 1:03d}"
+            obj, created = AttachmentSubmission.objects.update_or_create(
+                submission_reference=ref,
+                defaults={
+                    "claim": claim,
+                    "channel": AttachmentRoute.HCPF_PORTAL,
+                    "status": AttachmentSubmissionStatus.CONFIRMED,
+                    "notes": "Demo HCPF portal attachment confirmation.",
+                    "is_active": True,
+                },
+            )
+            if created or obj.confirmed_at is None:
+                from django.utils import timezone
+
+                now = timezone.now()
+                obj.submitted_at = obj.submitted_at or now
+                obj.confirmed_at = obj.confirmed_at or now
+                obj.save(
+                    update_fields=["submitted_at", "confirmed_at", "updated_at"]
+                )
+            sync_claim_from_attachment_submission(obj)
+            rows.append(obj)
+        return rows
+
     def _seed_sftp(self, partners):
         creds = []
         dirs = []
@@ -507,3 +622,68 @@ class Command(BaseCommand):
             )
             dirs.append(directory)
         return creds, dirs
+
+    def _seed_sftp_from_env(self, partners):
+        """
+        Seed real/test SFTP from env (SFTP_SEED_HOST / USER / PASSWORD).
+        Creates /send (OUTBOUND_837P) and /recv (INBOUND_999) directories.
+        """
+        host = (getattr(settings, "SFTP_SEED_HOST", "") or "").strip()
+        username = (getattr(settings, "SFTP_SEED_USERNAME", "") or "").strip()
+        password = (getattr(settings, "SFTP_SEED_PASSWORD", "") or "").strip()
+        if not host or not username or not password:
+            self.stdout.write(
+                "  SFTP env seed skipped (set SFTP_SEED_HOST/USERNAME/PASSWORD)."
+            )
+            return None, []
+
+        name = getattr(settings, "SFTP_SEED_NAME", "SEED-SFTP-CLOUD") or "SEED-SFTP-CLOUD"
+        port = int(getattr(settings, "SFTP_SEED_PORT", 22) or 22)
+        send_path = getattr(settings, "SFTP_SEED_SEND_PATH", "/send") or "/send"
+        recv_path = getattr(settings, "SFTP_SEED_RECV_PATH", "/recv") or "/recv"
+        partner = partners[0] if partners else None
+
+        cred, _ = SFTPCredentials.objects.update_or_create(
+            name=name,
+            environment="TEST",
+            defaults={
+                "trading_partner": partner,
+                "host": host,
+                "port": port,
+                "username": username,
+                "auth_type": SFTPAuthType.PASSWORD,
+                "password": password,
+                "timeout_seconds": 30,
+                "notes": "Seeded from SFTP_SEED_* env (local test).",
+                "is_active": True,
+            },
+        )
+        dirs = []
+        outbound, _ = SFTPDirectory.objects.update_or_create(
+            credentials=cred,
+            purpose=SFTPDirectoryPurpose.OUTBOUND_837P,
+            sending_path=send_path,
+            receiving_path=recv_path,
+            defaults={
+                "name": f"{name} send/recv",
+                "is_active": True,
+            },
+        )
+        dirs.append(outbound)
+        inbound, _ = SFTPDirectory.objects.update_or_create(
+            credentials=cred,
+            purpose=SFTPDirectoryPurpose.INBOUND_999,
+            sending_path=send_path,
+            receiving_path=recv_path,
+            defaults={
+                "name": f"{name} recv/999",
+                "is_active": True,
+            },
+        )
+        dirs.append(inbound)
+        self.stdout.write(
+            self.style.SUCCESS(
+                f"  SFTP env seed: {name} → {host} ({send_path}, {recv_path})"
+            )
+        )
+        return cred, dirs

@@ -1,6 +1,12 @@
 from django.contrib import admin
 
-from apps.claim.models import BatchClaim, Claim, ClaimDocument, SubmissionBatch
+from apps.claim.models import (
+    AttachmentSubmission,
+    BatchClaim,
+    Claim,
+    ClaimDocument,
+    SubmissionBatch,
+)
 
 
 @admin.register(Claim)
@@ -118,4 +124,27 @@ class BatchClaimAdmin(admin.ModelAdmin):
     list_filter = ("is_active",)
     search_fields = ("st02", "batch__batch_number", "claim__claim_number")
     autocomplete_fields = ("batch", "claim")
+    readonly_fields = ("id", "created_at", "updated_at")
+
+
+@admin.register(AttachmentSubmission)
+class AttachmentSubmissionAdmin(admin.ModelAdmin):
+    list_display = (
+        "id",
+        "claim",
+        "channel",
+        "submission_reference",
+        "status",
+        "submitted_at",
+        "confirmed_at",
+        "is_active",
+        "created_at",
+    )
+    list_filter = ("channel", "status", "is_active")
+    search_fields = (
+        "submission_reference",
+        "notes",
+        "claim__claim_number",
+    )
+    autocomplete_fields = ("claim",)
     readonly_fields = ("id", "created_at", "updated_at")

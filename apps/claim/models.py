@@ -3,6 +3,7 @@ from django.db import models
 from apps.claim.choices import (
     AttachmentRoute,
     AttachmentStatus,
+    AttachmentSubmissionStatus,
     BatchStatus,
     ClaimStatus,
     DocumentStatus,
@@ -277,3 +278,67 @@ class BatchClaim(BaseModel):
 
     def __str__(self):
         return f"BatchClaim {self.pk} (ST02={self.st02})"
+
+
+class AttachmentSubmissionQuerySet(models.QuerySet):
+    def with_relations(self):
+        return self.select_related(
+            "claim",
+            "claim__trip",
+            "claim__trip__patient",
+            "claim__trip__provider",
+        )
+
+
+class AttachmentSubmission(BaseModel):
+    """
+    Transmission of claim documents on the HCPF-approved attachment channel.
+    Distinct from ClaimDocument (file store). Does not travel inside 837P.
+    """
+
+    claim = models.ForeignKey(
+        Claim,
+        on_delete=models.PROTECT,
+        related_name="attachment_submissions",
+        null=True,
+        blank=True,
+    )
+    channel = models.CharField(
+        max_length=64,
+        choices=AttachmentRoute.choices,
+        default=AttachmentRoute.HCPF_PORTAL,
+        null=True,
+        blank=True,
+    )
+    submission_reference = models.CharField(max_length=128, null=True, blank=True)
+    status = models.CharField(
+        max_length=32,
+        choices=AttachmentSubmissionStatus.choices,
+        default=AttachmentSubmissionStatus.QUEUED,
+        null=True,
+        blank=True,
+    )
+    submitted_at = models.DateTimeField(null=True, blank=True)
+    confirmed_at = models.DateTimeField(null=True, blank=True)
+    notes = models.CharField(max_length=500, null=True, blank=True)
+    is_active = models.BooleanField(default=True)
+
+    objects = AttachmentSubmissionQuerySet.as_manager()
+
+    class Meta:
+        verbose_name = "Attachment Submission"
+        verbose_name_plural = "Attachment Submissions"
+        ordering = ("-id",)
+        indexes = [
+            models.Index(
+                fields=["claim", "status"],
+                name="attach_sub_claim_status_idx",
+            ),
+            models.Index(
+                fields=["status", "is_active"],
+                name="attach_sub_status_active_idx",
+            ),
+        ]
+
+    def __str__(self):
+        return self.submission_reference or f"AttachmentSubmission {self.pk}"

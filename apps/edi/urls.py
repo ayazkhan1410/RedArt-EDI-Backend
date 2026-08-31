@@ -1,5 +1,10 @@
 from django.urls import path
 
+from apps.edi.ack_views import (
+    EDIAcknowledgementApplyAPIView,
+    EDIAcknowledgementDetailAPIView,
+    EDIAcknowledgementListCreateAPIView,
+)
 from apps.edi.sftp_views import (
     SFTPCredentialsDetailAPIView,
     SFTPCredentialsListCreateAPIView,
@@ -12,8 +17,12 @@ from apps.edi.views import (
     EDIControlNumberListCreateAPIView,
     EDIFileDetailAPIView,
     EDIFileFromBatchAPIView,
+    EDIFileGenerate837PAPIView,
     EDIFileListCreateAPIView,
     EDIFileMarkUploadedAPIView,
+    EDIFileQueueUploadAPIView,
+    EDIFileTransferLogDetailAPIView,
+    EDIFileTransferLogListAPIView,
 )
 
 urlpatterns = [
@@ -43,14 +52,49 @@ urlpatterns = [
         name="edi-file-from-batch",
     ),
     path(
+        "edi-files/generate-837p/",
+        EDIFileGenerate837PAPIView.as_view(),
+        name="edi-file-generate-837p",
+    ),
+    path(
         "edi-files/<int:pk>/mark-uploaded/",
         EDIFileMarkUploadedAPIView.as_view(),
         name="edi-file-mark-uploaded",
     ),
     path(
+        "edi-files/<int:pk>/upload/",
+        EDIFileQueueUploadAPIView.as_view(),
+        name="edi-file-queue-upload",
+    ),
+    path(
         "edi-files/<int:pk>/",
         EDIFileDetailAPIView.as_view(),
         name="edi-file-detail",
+    ),
+    path(
+        "edi-file-transfer-logs/",
+        EDIFileTransferLogListAPIView.as_view(),
+        name="edi-file-transfer-log-list",
+    ),
+    path(
+        "edi-file-transfer-logs/<int:pk>/",
+        EDIFileTransferLogDetailAPIView.as_view(),
+        name="edi-file-transfer-log-detail",
+    ),
+    path(
+        "edi-acknowledgements/",
+        EDIAcknowledgementListCreateAPIView.as_view(),
+        name="edi-acknowledgement-list-create",
+    ),
+    path(
+        "edi-acknowledgements/apply/",
+        EDIAcknowledgementApplyAPIView.as_view(),
+        name="edi-acknowledgement-apply",
+    ),
+    path(
+        "edi-acknowledgements/<int:pk>/",
+        EDIAcknowledgementDetailAPIView.as_view(),
+        name="edi-acknowledgement-detail",
     ),
     path(
         "sftp-credentials/",

@@ -3,10 +3,15 @@
 from django.db import transaction
 from django.utils import timezone
 
-from apps.claim.choices import BatchStatus
-from apps.claim.models import SubmissionBatch
-from apps.edi.choices import EDIFileStatus, TransactionType
-from apps.edi.models import EDIControlNumber, EDIFile
+from apps.claim.choices import BatchStatus, ClaimStatus
+from apps.claim.models import BatchClaim, Claim, SubmissionBatch
+from apps.edi.choices import (
+    AcknowledgementStatus,
+    AcknowledgementType,
+    EDIFileStatus,
+    TransactionType,
+)
+from apps.edi.models import EDIAcknowledgement, EDIControlNumber, EDIFile
 from apps.edi.utils.readiness import assert_batch_ready_for_837p_generation
 
 
@@ -229,4 +234,132 @@ def mark_edi_file_uploaded(edi_file_id, *, path_or_blob_ref=None, file_hash=None
         batch.status = BatchStatus.SUBMITTED
         batch.save(update_fields=["status", "updated_at"])
 
+    # Business claim status: READY_FOR_837P → EDI_SENT (transport still on EDIFile).
+    if edi_file.batch_id:
+        claim_ids = BatchClaim.objects.filter(
+            batch_id=edi_file.batch_id,
+            is_active=True,
+            claim_id__isnull=False,
+        ).values_list("claim_id", flat=True)
+        Claim.objects.filter(
+            id__in=claim_ids,
+            is_active=True,
+            status__in=(
+                ClaimStatus.READY_FOR_837P,
+                ClaimStatus.DOCUMENTS_COMPLETE,
+            ),
+        ).update(status=ClaimStatus.EDI_SENT, updated_at=timezone.now())
+
     return edi_file
+
+
+def _normalize_st02(value):
+    if value in (None, ""):
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    if text.isdigit():
+        return text.zfill(4) if len(text) <= 4 else text
+    return text
+
+
+@transaction.atomic
+def apply_edi_acknowledgement(
+    *,
+    batch_id,
+    ack_type=AcknowledgementType.X999,
+    status=AcknowledgementStatus.ACCEPTED,
+    affected_st02=None,
+    raw_file_ref=None,
+    edi_file_id=None,
+    message=None,
+    acknowledged_at=None,
+    apply_claim_status=True,
+):
+    """
+    Persist a 999 (or related) acknowledgement and optionally advance claims.
+    ACCEPTED → Claim.status EDI_ACCEPTED for matching ST02. Never sets PAID.
+    """
+    batch = (
+        SubmissionBatch.objects.select_for_update(of=("self",))
+        .filter(pk=batch_id, is_active=True)
+        .first()
+    )
+    if batch is None:
+        raise ValueError("Batch not found or inactive.")
+
+    st02 = _normalize_st02(affected_st02)
+    ack_type = str(ack_type or AcknowledgementType.X999).strip().upper()
+    status = str(status or AcknowledgementStatus.ACCEPTED).strip().upper()
+    when = acknowledged_at or timezone.now()
+
+    edi_file = None
+    if edi_file_id:
+        edi_file = EDIFile.objects.filter(
+            pk=edi_file_id, is_active=True, batch_id=batch.id
+        ).first()
+        if edi_file is None:
+            raise ValueError("EDI file not found for this batch.")
+    else:
+        edi_file = (
+            EDIFile.objects.filter(batch_id=batch.id, is_active=True)
+            .order_by("-id")
+            .first()
+        )
+
+    ack = EDIAcknowledgement.objects.create(
+        batch=batch,
+        edi_file=edi_file,
+        ack_type=ack_type,
+        status=status,
+        affected_st02=st02,
+        raw_file_ref=(raw_file_ref or "").strip() or None,
+        message=(message or "").strip() or None,
+        acknowledged_at=when,
+        is_active=True,
+    )
+
+    updated_claim_ids = []
+    if apply_claim_status and status == AcknowledgementStatus.ACCEPTED and st02:
+        row = (
+            BatchClaim.objects.select_related("claim")
+            .filter(batch_id=batch.id, st02=st02, is_active=True)
+            .first()
+        )
+        if row is None:
+            # Also try unpadded match
+            row = (
+                BatchClaim.objects.select_related("claim")
+                .filter(batch_id=batch.id, is_active=True, st02__isnull=False)
+                .filter(st02=str(int(st02)) if st02.isdigit() else st02)
+                .first()
+            )
+        claim = row.claim if row else None
+        if claim and claim.is_active:
+            if claim.status not in (
+                ClaimStatus.PAID,
+                ClaimStatus.DENIED,
+                ClaimStatus.UNDER_REVIEW,
+            ):
+                claim.status = ClaimStatus.EDI_ACCEPTED
+                claim.save(update_fields=["status", "updated_at"])
+                updated_claim_ids.append(claim.id)
+
+    if status == AcknowledgementStatus.ACCEPTED:
+        if edi_file and edi_file.status in (
+            EDIFileStatus.UPLOADED,
+            EDIFileStatus.GENERATED,
+            EDIFileStatus.UPLOAD_QUEUED,
+        ):
+            edi_file.status = EDIFileStatus.ACKNOWLEDGED
+            edi_file.save(update_fields=["status", "updated_at"])
+        if batch.status in (
+            BatchStatus.SUBMITTED,
+            BatchStatus.GENERATED,
+            BatchStatus.READY,
+        ):
+            batch.status = BatchStatus.ACKNOWLEDGED
+            batch.save(update_fields=["status", "updated_at"])
+
+    return ack, updated_claim_ids

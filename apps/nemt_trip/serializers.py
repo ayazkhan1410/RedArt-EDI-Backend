@@ -1,3 +1,4 @@
+from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
 
 from apps.nemt_trip.models import NemtTrip
@@ -46,11 +47,13 @@ class NemtTripSerializer(serializers.ModelSerializer):
             "updated_at",
         )
 
+    @extend_schema_field(serializers.CharField(allow_null=True))
     def get_patient_name(self, obj):
         if not obj.patient_id:
             return None
         return f"{obj.patient.first_name} {obj.patient.last_name}".strip()
 
+    @extend_schema_field(serializers.CharField(allow_null=True))
     def get_provider_name(self, obj):
         if not obj.provider_id:
             return None
@@ -129,11 +132,13 @@ class NemtTripListSerializer(serializers.ModelSerializer):
         )
         read_only_fields = fields
 
+    @extend_schema_field(serializers.CharField(allow_null=True))
     def get_patient_name(self, obj):
         if not obj.patient_id:
             return None
         return f"{obj.patient.first_name} {obj.patient.last_name}".strip()
 
+    @extend_schema_field(serializers.CharField(allow_null=True))
     def get_provider_name(self, obj):
         if not obj.provider_id:
             return None

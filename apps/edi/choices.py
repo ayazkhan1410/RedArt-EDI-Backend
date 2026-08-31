@@ -8,12 +8,38 @@ class TransactionType(models.TextChoices):
     OTHER = "OTHER", "Other"
 
 
+class AcknowledgementType(models.TextChoices):
+    X999 = "999", "Implementation Acknowledgment"
+    X277 = "277", "Claim Status"
+    OTHER = "OTHER", "Other"
+
+
+class AcknowledgementStatus(models.TextChoices):
+    ACCEPTED = "ACCEPTED", "Accepted"
+    REJECTED = "REJECTED", "Rejected"
+    PARTIAL = "PARTIAL", "Partial"
+    ERROR = "ERROR", "Error"
+
+
 class EDIFileStatus(models.TextChoices):
     GENERATED = "GENERATED", "Generated"
+    UPLOAD_QUEUED = "UPLOAD_QUEUED", "Upload queued"
     UPLOADED = "UPLOADED", "Uploaded"
     ACKNOWLEDGED = "ACKNOWLEDGED", "Acknowledged"
     FAILED = "FAILED", "Failed"
     ARCHIVED = "ARCHIVED", "Archived"
+
+
+class TransferChannel(models.TextChoices):
+    SFTP = "SFTP", "SFTP"
+    S3 = "S3", "S3 / MinIO"
+
+
+class TransferLogStatus(models.TextChoices):
+    PENDING = "PENDING", "Pending"
+    IN_PROGRESS = "IN_PROGRESS", "In progress"
+    SUCCESS = "SUCCESS", "Success"
+    FAILED = "FAILED", "Failed"
 
 
 class SFTPAuthType(models.TextChoices):

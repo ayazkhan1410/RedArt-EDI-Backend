@@ -9,8 +9,8 @@ from rest_framework.test import APITestCase
 from apps.claim.choices import BatchStatus, ClaimStatus, DocumentStatus, DocumentType
 from apps.claim.models import BatchClaim, Claim, ClaimDocument, SubmissionBatch
 from apps.claim.utils.service import create_claim_from_trip, sync_claim_document_status
-from apps.edi.choices import EDIFileStatus
-from apps.edi.models import EDIControlNumber, EDIFile
+from apps.edi.choices import EDIFileStatus, TransferLogStatus
+from apps.edi.models import EDIControlNumber, EDIFile, EDIFileTransferLog
 from apps.edi.utils.envelope import get_edi_envelope_config
 from apps.edi.utils.readiness import assert_batch_ready_for_837p_generation
 from apps.edi.utils.service import (
@@ -57,7 +57,14 @@ class EDIFixturesMixin:
         )
         self.provider = ProviderBillingProfile.objects.create(
             legal_name="Al Shifa",
+            billing_name="Al Shifa Transportation",
             npi="1234567890",
+            taxonomy_code="343900000X",
+            address_line_1="100 Main St",
+            city="Denver",
+            state="CO",
+            zip="80202",
+            phone="3035550199",
         )
         self.trip = NemtTrip.objects.create(
             patient=self.patient,
@@ -223,3 +230,169 @@ class EDIAPITests(EDIFixturesMixin, APITestCase):
             format="json",
         )
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+
+class Generate837PTests(EDIFixturesMixin, APITestCase):
+    def test_handler_and_generate_api(self):
+        from apps.edi.utils.handler import Generate837PHandler
+        from apps.edi.utils.schema import build_edi_content, render_edi_file
+
+        handler = Generate837PHandler(self.batch.id)
+        payload = handler.build_payload_dict()
+        self.assertEqual(payload["trading_partner"]["sender_id"], "TP123456")
+        self.assertEqual(len(payload["claims"]), 1)
+        segments = build_edi_content(payload)
+        body = render_edi_file(segments)
+        self.assertIn("ISA*", body)
+        self.assertIn("COMEDASSISTPROG", body)
+        self.assertIn("CO_TXIX", body)
+        self.assertIn("ST*837*", body)
+        # 2000A: PRV before 2010AA NM1; 2010AA: REF*EI after N4
+        hl_i = body.index("HL*1**20*1~")
+        prv_i = body.index("PRV*BI*PXC*")
+        nm1_i = body.index("NM1*85*")
+        ref_i = body.index("REF*EI*")
+        self.assertLess(hl_i, prv_i)
+        self.assertLess(prv_i, nm1_i)
+        self.assertLess(nm1_i, ref_i)
+        self.assertTrue(body.strip().endswith("IEA*1*000000001~") or "IEA*1*" in body)
+
+        edi_file, _, _ = handler.generate()
+        self.assertEqual(edi_file.status, EDIFileStatus.GENERATED)
+        self.assertTrue(edi_file.filename.startswith("TP123456-837P-"))
+        self.assertTrue(edi_file.file_hash)
+
+        # Second generate via API on same batch still allowed (new file)
+        response = self.client.post(
+            reverse("edi-file-generate-837p"),
+            {"batch_id": self.batch.id},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data["data"]["status"], "GENERATED")
+
+    def test_queue_upload_writes_transfer_logs(self):
+        from unittest.mock import patch
+
+        from apps.edi.choices import TransferLogStatus
+        from apps.edi.models import EDIFileTransferLog, SFTPCredentials, SFTPDirectory
+        from apps.edi.utils.handler import Generate837PHandler
+
+        edi_file, _, _ = Generate837PHandler(self.batch.id).generate()
+        cred = SFTPCredentials.objects.create(
+            name="TEST-SFTP",
+            trading_partner=self.partner,
+            environment="TEST",
+            host="127.0.0.1",
+            port=22,
+            username="user",
+            auth_type="PASSWORD",
+            password="secret",
+            is_active=True,
+        )
+        SFTPDirectory.objects.create(
+            credentials=cred,
+            name="outbound",
+            purpose="OUTBOUND_837P",
+            sending_path="/send",
+            receiving_path="/recv",
+            is_active=True,
+        )
+
+        with self.settings(CELERY_TASK_ALWAYS_EAGER=True, CELERY_TASK_STORE_EAGER_RESULT=True):
+            with patch(
+                "apps.edi.utils.upload.upload_bytes_via_sftp",
+                return_value="/send/" + edi_file.filename,
+            ), patch(
+                "apps.edi.utils.upload.upload_bytes_to_s3",
+                return_value="s3://edi-files/edi/837p/1/" + edi_file.filename,
+            ):
+                response = self.client.post(
+                    reverse("edi-file-queue-upload", kwargs={"pk": edi_file.id}),
+                    {},
+                    format="json",
+                )
+        self.assertEqual(response.status_code, status.HTTP_202_ACCEPTED)
+        edi_file.refresh_from_db()
+        self.assertEqual(edi_file.status, EDIFileStatus.UPLOADED)
+        logs = EDIFileTransferLog.objects.filter(edi_file=edi_file)
+        self.assertEqual(logs.count(), 2)
+        self.assertTrue(
+            logs.filter(channel="SFTP", status=TransferLogStatus.SUCCESS).exists()
+        )
+        self.assertTrue(
+            logs.filter(channel="S3", status=TransferLogStatus.SUCCESS).exists()
+        )
+
+        listed = self.client.get(
+            reverse("edi-file-transfer-log-list"),
+            {"edi_file_id": edi_file.id},
+        )
+        self.assertEqual(listed.status_code, status.HTTP_200_OK)
+        self.assertEqual(listed.data["count"], 2)
+
+        # Resend allowed after UPLOADED
+        with self.settings(CELERY_TASK_ALWAYS_EAGER=True, CELERY_TASK_STORE_EAGER_RESULT=True):
+            with patch(
+                "apps.edi.utils.upload.upload_bytes_via_sftp",
+                return_value="/send/" + edi_file.filename,
+            ), patch(
+                "apps.edi.utils.upload.upload_bytes_to_s3",
+                return_value="s3://edi-files/edi/837p/1/" + edi_file.filename,
+            ):
+                again = self.client.post(
+                    reverse("edi-file-queue-upload", kwargs={"pk": edi_file.id}),
+                    {"credentials_id": cred.id},
+                    format="json",
+                )
+        self.assertEqual(again.status_code, status.HTTP_202_ACCEPTED)
+        edi_file.refresh_from_db()
+        self.assertEqual(edi_file.status, EDIFileStatus.UPLOADED)
+        self.assertEqual(
+            EDIFileTransferLog.objects.filter(edi_file=edi_file).count(),
+            4,
+        )
+
+
+class EDIAcknowledgementAPITests(EDIFixturesMixin, APITestCase):
+    def test_apply_999_sets_edi_accepted_not_paid(self):
+        edi = create_edi_file_for_batch(
+            batch_id=self.batch.id,
+            file_hash="ACKHASH1",
+            path_or_blob_ref="media/edi/demo.txt",
+        )
+        mark_edi_file_uploaded(edi.id)
+        self.claim.refresh_from_db()
+        self.assertEqual(self.claim.status, ClaimStatus.EDI_SENT)
+
+        response = self.client.post(
+            reverse("edi-acknowledgement-apply"),
+            {
+                "batch_id": self.batch.id,
+                "ack_type": "999",
+                "status": "ACCEPTED",
+                "affected_st02": "0001",
+                "raw_file_ref": "s3://edi/999_001.edi",
+                "apply_claim_status": True,
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data["data"]["status"], "ACCEPTED")
+        self.assertIn(self.claim.id, response.data["data"]["updated_claim_ids"])
+
+        self.claim.refresh_from_db()
+        self.assertEqual(self.claim.status, ClaimStatus.EDI_ACCEPTED)
+        self.assertNotEqual(self.claim.status, ClaimStatus.PAID)
+
+        edi.refresh_from_db()
+        self.assertEqual(edi.status, EDIFileStatus.ACKNOWLEDGED)
+        self.batch.refresh_from_db()
+        self.assertEqual(self.batch.status, BatchStatus.ACKNOWLEDGED)
+
+        listed = self.client.get(
+            reverse("edi-acknowledgement-list-create"),
+            {"batch_id": self.batch.id},
+        )
+        self.assertEqual(listed.status_code, status.HTTP_200_OK)
+        self.assertGreaterEqual(listed.data["count"], 1)

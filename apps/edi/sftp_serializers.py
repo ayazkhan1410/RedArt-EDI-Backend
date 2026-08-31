@@ -1,3 +1,4 @@
+from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
 
 from apps.edi.choices import SFTPAuthType, SFTPDirectoryPurpose
@@ -72,9 +73,11 @@ class SFTPCredentialsSerializer(serializers.ModelSerializer):
             "updated_at",
         )
 
+    @extend_schema_field(serializers.BooleanField())
     def get_has_password(self, obj):
         return bool(obj.password)
 
+    @extend_schema_field(serializers.BooleanField())
     def get_has_private_key(self, obj):
         return bool(obj.private_key_pem)
 
@@ -251,9 +254,11 @@ class SFTPCredentialsListSerializer(serializers.ModelSerializer):
         )
         read_only_fields = fields
 
+    @extend_schema_field(serializers.BooleanField())
     def get_has_password(self, obj):
         return bool(obj.password)
 
+    @extend_schema_field(serializers.BooleanField())
     def get_has_private_key(self, obj):
         return bool(obj.private_key_pem)
 
@@ -356,6 +361,7 @@ class SFTPDirectoryListSerializer(serializers.ModelSerializer):
         )
         read_only_fields = fields
 
+    @extend_schema_field(serializers.CharField(allow_null=True))
     def get_credentials_name(self, obj):
         return obj.credentials.name if obj.credentials_id else None
 

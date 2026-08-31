@@ -6,6 +6,7 @@ class ClaimStatus(models.TextChoices):
     DOCUMENTS_REQUIRED = "DOCUMENTS_REQUIRED", "Documents required"
     DOCUMENTS_COMPLETE = "DOCUMENTS_COMPLETE", "Documents complete"
     READY_FOR_837P = "READY_FOR_837P", "Ready for 837P"
+    EDI_SENT = "EDI_SENT", "837P sent"
     EDI_ACCEPTED = "EDI_ACCEPTED", "EDI accepted"
     ATTACHMENT_REQUIRED = "ATTACHMENT_REQUIRED", "Attachment required"
     ATTACHMENT_QUEUED = "ATTACHMENT_QUEUED", "Attachment queued"
@@ -25,6 +26,13 @@ class AttachmentRoute(models.TextChoices):
 class AttachmentStatus(models.TextChoices):
     NOT_REQUIRED = "NOT_REQUIRED", "Not required"
     PENDING = "PENDING", "Pending"
+    QUEUED = "QUEUED", "Queued"
+    SUBMITTED = "SUBMITTED", "Submitted"
+    CONFIRMED = "CONFIRMED", "Confirmed"
+    FAILED = "FAILED", "Failed"
+
+
+class AttachmentSubmissionStatus(models.TextChoices):
     QUEUED = "QUEUED", "Queued"
     SUBMITTED = "SUBMITTED", "Submitted"
     CONFIRMED = "CONFIRMED", "Confirmed"
