@@ -300,10 +300,16 @@ case "${ROLE}" in
     ;;
   flower)
     echo "[entrypoint] Starting Flower (Celery monitor) ..."
+    FLOWER_AUTH="${FLOWER_BASIC_AUTH:-}"
+    if [ -z "${FLOWER_AUTH}" ]; then
+      echo "[entrypoint] ERROR: FLOWER_BASIC_AUTH must be set (user:password)." >&2
+      exit 1
+    fi
     exec celery -A redartdigital flower \
       --address=0.0.0.0 \
       --port="${FLOWER_PORT:-5555}" \
-      --broker="${CELERY_BROKER_URL:-redis://redis:6379/0}"
+      --broker="${CELERY_BROKER_URL:-redis://redis:6379/0}" \
+      --basic-auth="${FLOWER_AUTH}"
     ;;
   *)
     echo "[entrypoint] Unknown role: ${ROLE}"

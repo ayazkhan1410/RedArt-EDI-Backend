@@ -1,6 +1,6 @@
 """EDI control-number allocation and file record helpers."""
 
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.utils import timezone
 
 from apps.claim.choices import BatchStatus, ClaimStatus
@@ -24,16 +24,30 @@ def _digits_only(value):
 
 def next_isa13(environment):
     """Next 9-digit ISA13 for the environment (starts at 000000001)."""
-    rows = (
-        EDIControlNumber.objects.filter(
-            environment=environment,
-            is_active=True,
-        )
+    from django.db.models import Max
+
+    # Lock existing rows for this env so concurrent allocators serialize.
+    (
+        EDIControlNumber.objects.select_for_update()
+        .filter(environment=environment, is_active=True)
+        .order_by("id")
+        .first()
+    )
+    agg = (
+        EDIControlNumber.objects.filter(environment=environment, is_active=True)
         .exclude(isa13__isnull=True)
         .exclude(isa13="")
-        .values_list("isa13", flat=True)
+        .aggregate(m=Max("isa13"))
     )
-    max_n = 0
+    raw = agg.get("m")
+    max_n = int(_digits_only(raw) or 0) if raw else 0
+    # Prefer numeric max: Max on zero-padded strings works for fixed width.
+    rows = (
+        EDIControlNumber.objects.filter(environment=environment, is_active=True)
+        .exclude(isa13__isnull=True)
+        .exclude(isa13="")
+        .values_list("isa13", flat=True)[:5000]
+    )
     for value in rows:
         digits = _digits_only(value)
         if digits:
@@ -43,16 +57,19 @@ def next_isa13(environment):
 
 def next_gs06(environment):
     """Next GS06 for the environment (integer sequence as string)."""
-    rows = (
-        EDIControlNumber.objects.filter(
-            environment=environment,
-            is_active=True,
-        )
-        .exclude(gs06__isnull=True)
-        .exclude(gs06="")
-        .values_list("gs06", flat=True)
+    (
+        EDIControlNumber.objects.select_for_update()
+        .filter(environment=environment, is_active=True)
+        .order_by("id")
+        .first()
     )
     max_n = 0
+    rows = (
+        EDIControlNumber.objects.filter(environment=environment, is_active=True)
+        .exclude(gs06__isnull=True)
+        .exclude(gs06="")
+        .values_list("gs06", flat=True)[:5000]
+    )
     for value in rows:
         digits = _digits_only(value)
         if digits:
@@ -92,6 +109,7 @@ def allocate_control_numbers(
     """
     Create (or return existing active) EDIControlNumber for a batch.
     Allocates next ISA13/GS06 per environment when not provided.
+    Retries briefly on unique races between concurrent allocators.
     """
     batch = (
         SubmissionBatch.objects.select_for_update(of=("self",))
@@ -111,21 +129,43 @@ def allocate_control_numbers(
         return existing, False
 
     env = (environment or batch.environment or "TEST").strip().upper()
-    isa = _digits_only(isa13) or next_isa13(env)
-    gs = _digits_only(gs06) or next_gs06(env)
+    last_error = None
+    for _ in range(5):
+        isa = _digits_only(isa13) or next_isa13(env)
+        gs = _digits_only(gs06) or next_gs06(env)
 
-    if len(isa) > 9:
-        raise ValueError("isa13 must be at most 9 digits.")
-    isa = isa.zfill(9)
+        if len(isa) > 9:
+            raise ValueError("isa13 must be at most 9 digits.")
+        isa = isa.zfill(9)
 
-    row = EDIControlNumber.objects.create(
-        batch=batch,
-        environment=env,
-        isa13=isa,
-        gs06=gs,
-        is_active=True,
+        try:
+            with transaction.atomic():
+                row = EDIControlNumber.objects.create(
+                    batch=batch,
+                    environment=env,
+                    isa13=isa,
+                    gs06=gs,
+                    is_active=True,
+                )
+            return row, True
+        except IntegrityError as exc:
+            last_error = exc
+            # Another worker may have created this batch's control row.
+            existing = (
+                EDIControlNumber.objects.select_for_update(of=("self",))
+                .filter(batch_id=batch.id, is_active=True)
+                .first()
+            )
+            if existing is not None:
+                return existing, False
+            # ISA13/GS06 collision — retry with next numbers (clear overrides).
+            isa13 = None
+            gs06 = None
+            continue
+
+    raise ValueError(
+        f"Unable to allocate unique ISA13/GS06 after retries: {last_error}"
     )
-    return row, True
 
 
 @transaction.atomic

@@ -11,10 +11,12 @@ from pathlib import Path
 
 from django.conf import settings
 from django.db import transaction
+from django.db.models import Prefetch
 from django.utils import timezone
 
 from apps.claim.choices import BatchStatus
 from apps.claim.models import BatchClaim
+from apps.claim_service_line.models import ClaimServiceLine
 from apps.edi.choices import EDIFileStatus, TransactionType
 from apps.edi.models import EDIFile
 from apps.edi.utils.envelope import get_edi_envelope_config
@@ -61,7 +63,14 @@ class Generate837PHandler:
         self.batch_claims = list(
             BatchClaim.objects.with_relations()
             .filter(batch_id=self.batch.id, is_active=True)
-            .prefetch_related("claim__service_lines")
+            .prefetch_related(
+                Prefetch(
+                    "claim__service_lines",
+                    queryset=ClaimServiceLine.objects.filter(is_active=True).order_by(
+                        "id"
+                    ),
+                )
+            )
             .order_by("id")
         )
 
@@ -86,7 +95,7 @@ class Generate837PHandler:
 
             lines = []
             line_total = Decimal("0")
-            for line in claim.service_lines.filter(is_active=True).order_by("id"):
+            for line in claim.service_lines.all():
                 line_charge = Decimal(line.charge if line.charge is not None else (trip.charge or 0))
                 line_total += line_charge
                 lines.append(
@@ -206,19 +215,11 @@ class Generate837PHandler:
             self.batch.save(update_fields=["status", "updated_at"])
 
         logger.info(
-            "Generated 837P edi_file_id=%s batch_id=%s path=%s segments=%s",
+            "Generated 837P edi_file_id=%s batch_id=%s path=%s segments=%s sha256=%s",
             edi_file.id,
             self.batch.id,
             relative_path,
             len(segments),
+            digest[:16],
         )
-        # Full X12 body to Docker/runserver console for debugging.
-        print(
-            f"\n===== 837P GENERATED: {filename} "
-            f"(edi_file_id={edi_file.id}, batch_id={self.batch.id}) =====\n"
-            f"{body}"
-            f"===== END 837P ({len(segments)} segments, sha256={digest[:12]}...) =====\n",
-            flush=True,
-        )
-        logger.info("837P file contents for %s:\n%s", filename, body)
         return edi_file, payload, body

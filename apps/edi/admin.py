@@ -116,7 +116,15 @@ class SFTPCredentialsAdmin(admin.ModelAdmin):
     list_filter = ("environment", "auth_type", "is_active")
     search_fields = ("name", "host", "username")
     autocomplete_fields = ("trading_partner",)
-    readonly_fields = ("id", "created_at", "updated_at")
+    # Never echo ciphertext / PEM in admin change forms.
+    readonly_fields = (
+        "id",
+        "created_at",
+        "updated_at",
+        "password",
+        "private_key_pem",
+        "private_key_passphrase",
+    )
     fieldsets = (
         (
             None,
@@ -138,10 +146,14 @@ class SFTPCredentialsAdmin(admin.ModelAdmin):
             },
         ),
         (
-            "Secrets",
+            "Secrets (set via API; masked here)",
             {
                 "classes": ("collapse",),
                 "fields": ("password", "private_key_pem", "private_key_passphrase"),
+                "description": (
+                    "Secret values are write-only via the SFTP credentials API. "
+                    "Admin shows stored ciphertext only; rotate via API PATCH."
+                ),
             },
         ),
         ("Timestamps", {"fields": ("created_at", "updated_at")}),

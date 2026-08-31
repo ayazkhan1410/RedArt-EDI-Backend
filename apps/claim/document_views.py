@@ -16,6 +16,8 @@ from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from apps.core.soft_delete import hard_delete_permission_error, parse_hard_flag
+
 from apps.claim.models import Claim, ClaimDocument
 from apps.claim.serializers import (
     ClaimDocumentIdSerializer,
@@ -250,11 +252,10 @@ class ClaimDocumentDetailAPIView(APIView):
         try:
             doc = get_object_or_404(ClaimDocument.objects.with_relations(), pk=pk)
             claim = doc.claim
-            hard_delete = request.query_params.get("hard", "").lower() in (
-                "1",
-                "true",
-                "yes",
-            )
+            hard_delete = parse_hard_flag(request)
+            denied = hard_delete_permission_error(request, hard_delete)
+            if denied is not None:
+                return denied
             if hard_delete:
                 doc_id = doc.id
                 doc.delete()

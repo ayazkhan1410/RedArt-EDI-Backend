@@ -1,10 +1,10 @@
 from datetime import date
 from decimal import Decimal
 
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.urls import reverse
 from rest_framework import status
-from rest_framework.test import APITestCase
+from apps.core.testing import AuthAPITestCase
 
 from apps.claim.choices import BatchStatus, ClaimStatus, DocumentStatus, DocumentType
 from apps.claim.models import BatchClaim, Claim, ClaimDocument, SubmissionBatch
@@ -28,6 +28,7 @@ from apps.trading_partner.models import TradingPartner
 
 class EDIFixturesMixin:
     def setUp(self):
+        super().setUp()
         LongDistanceRule.objects.update_or_create(
             county_type="STANDARD",
             defaults={
@@ -166,7 +167,7 @@ class EDIServiceTests(EDIFixturesMixin, TestCase):
             create_edi_file_for_batch(batch_id=self.batch.id)
 
 
-class EDIAPITests(EDIFixturesMixin, APITestCase):
+class EDIAPITests(EDIFixturesMixin, AuthAPITestCase):
     def test_allocate_and_from_batch_apis(self):
         alloc = self.client.post(
             reverse("edi-control-number-allocate"),
@@ -232,7 +233,8 @@ class EDIAPITests(EDIFixturesMixin, APITestCase):
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
 
-class Generate837PTests(EDIFixturesMixin, APITestCase):
+class Generate837PTests(EDIFixturesMixin, AuthAPITestCase):
+    @override_settings(EDI_DEFAULT_BILLING_TAX_ID="123456789")
     def test_handler_and_generate_api(self):
         from apps.edi.utils.handler import Generate837PHandler
         from apps.edi.utils.schema import build_edi_content, render_edi_file
@@ -353,7 +355,7 @@ class Generate837PTests(EDIFixturesMixin, APITestCase):
         )
 
 
-class EDIAcknowledgementAPITests(EDIFixturesMixin, APITestCase):
+class EDIAcknowledgementAPITests(EDIFixturesMixin, AuthAPITestCase):
     def test_apply_999_sets_edi_accepted_not_paid(self):
         edi = create_edi_file_for_batch(
             batch_id=self.batch.id,
@@ -452,7 +454,7 @@ class EDIAcknowledgementAPITests(EDIFixturesMixin, APITestCase):
         self.assertLess(dn_i, lx_i)
 
 
-class EDI999ImportAPITests(EDIFixturesMixin, APITestCase):
+class EDI999ImportAPITests(EDIFixturesMixin, AuthAPITestCase):
     def test_poll_import_999_async_returns_celery_task(self):
         from unittest.mock import patch
 

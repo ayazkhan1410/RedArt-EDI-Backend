@@ -3,7 +3,7 @@ from decimal import Decimal
 
 from django.urls import reverse
 from rest_framework import status
-from rest_framework.test import APITestCase
+from apps.core.testing import AuthAPITestCase
 
 from apps.long_distance_rule.models import LongDistanceRule
 from apps.long_distance_rule.utils.counties import resolve_county_type
@@ -13,8 +13,9 @@ from apps.patient.models import Patient
 from apps.provider_billing_profile.models import ProviderBillingProfile
 
 
-class NemtTripAPITests(APITestCase):
+class NemtTripAPITests(AuthAPITestCase):
     def setUp(self):
+        super().setUp()
         LongDistanceRule.objects.update_or_create(
             county_type="STANDARD",
             defaults={
@@ -115,8 +116,9 @@ class NemtTripAPITests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
 
-class LongDistanceRuleAPITests(APITestCase):
+class LongDistanceRuleAPITests(AuthAPITestCase):
     def setUp(self):
+        super().setUp()
         LongDistanceRule.objects.update_or_create(
             county_type="STANDARD",
             defaults={

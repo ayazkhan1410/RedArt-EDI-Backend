@@ -12,13 +12,12 @@ SECRET_KEY = env(
 
 ALLOWED_HOSTS = env.list("DJANGO_ALLOWED_HOSTS", default=["localhost", "127.0.0.1"])
 
-CORS_ALLOW_ALL_ORIGINS = env.bool("CORS_ALLOW_ALL_ORIGINS", default=True)
+CORS_ALLOW_ALL_ORIGINS = env.bool("CORS_ALLOW_ALL_ORIGINS", default=False)
 
 EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
 
-# Local/Docker default: open for Swagger demos. Set API_REQUIRE_AUTH=true to
-# enforce JWT/session like production (RedArt must send Bearer token).
-if env.bool("API_REQUIRE_AUTH", default=False):
+# Prefer authenticated local APIs. Set API_REQUIRE_AUTH=false only for open Swagger demos.
+if env.bool("API_REQUIRE_AUTH", default=True):
     REST_FRAMEWORK = {
         **REST_FRAMEWORK,
         "DEFAULT_PERMISSION_CLASSES": [

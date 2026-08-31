@@ -63,3 +63,8 @@ DATABASES = {
         "OPTIONS": {"sslmode": env("POSTGRES_SSLMODE", default="prefer")},
     }
 }
+
+# Production SFTP must verify host keys (override only with explicit env).
+EDI_SFTP_REQUIRE_HOST_FINGERPRINT = env.bool(
+    "EDI_SFTP_REQUIRE_HOST_FINGERPRINT", default=True
+)

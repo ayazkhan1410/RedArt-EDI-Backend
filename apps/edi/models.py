@@ -636,6 +636,7 @@ class EDI835Remittance(BaseModel):
         max_length=64,
         null=True,
         blank=True,
+        unique=True,
         help_text="SHA-256 of normalized content for idempotent re-import.",
     )
     raw_file_ref = models.CharField(max_length=1024, null=True, blank=True)

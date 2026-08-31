@@ -32,16 +32,37 @@ def content_sha256(raw: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
-def _find_claim(claim_number: str):
+def _find_claim(claim_number: str, *, by_number: dict | None = None):
     number = (claim_number or "").strip()
     if not number:
         return None
+    if by_number is not None:
+        return by_number.get(number)
     return (
         Claim.objects.filter(is_active=True)
         .filter(Q(claim_number=number) | Q(external_id=number))
         .order_by("-id")
         .first()
     )
+
+
+def _claim_lookup_map(claim_numbers: list[str]) -> dict[str, Claim]:
+    """One query for all CLP claim numbers / external ids."""
+    numbers = sorted({(n or "").strip() for n in claim_numbers if (n or "").strip()})
+    if not numbers:
+        return {}
+    claims = list(
+        Claim.objects.filter(is_active=True)
+        .filter(Q(claim_number__in=numbers) | Q(external_id__in=numbers))
+        .order_by("id")
+    )
+    by_number: dict[str, Claim] = {}
+    for claim in claims:
+        if claim.claim_number:
+            by_number.setdefault(claim.claim_number.strip(), claim)
+        if claim.external_id:
+            by_number.setdefault(claim.external_id.strip(), claim)
+    return by_number
 
 
 def _should_apply_status(*, claim, new_status: str) -> tuple[bool, str | None]:
@@ -105,9 +126,12 @@ def import_835_remittance(
 
     updated_claim_ids: list[int] = []
     applied_count = 0
+    by_number = _claim_lookup_map(
+        [line.get("claim_number") or "" for line in parsed["claims"]]
+    )
 
     for line in parsed["claims"]:
-        claim = _find_claim(line["claim_number"])
+        claim = _find_claim(line["claim_number"], by_number=by_number)
         outcome = line["outcome"]
         prior_status = claim.status if claim else None
         status_applied = False

@@ -1,7 +1,10 @@
 """Pre-flight checks before 837P generation."""
 
+from django.db.models import Prefetch
+
 from apps.claim.models import BatchClaim, SubmissionBatch
 from apps.claim.utils.service import assert_claim_ready_for_batch
+from apps.claim_service_line.models import ClaimServiceLine
 from apps.edi.utils.envelope import get_edi_envelope_config
 
 
@@ -32,7 +35,7 @@ def assert_batch_ready_for_837p_generation(batch):
     # Envelope constants must resolve (settings-backed).
     get_edi_envelope_config(batch.environment or partner.environment)
 
-    rows = (
+    rows = list(
         BatchClaim.objects.with_relations()
         .filter(batch_id=batch.id, is_active=True)
         .select_related(
@@ -41,8 +44,14 @@ def assert_batch_ready_for_837p_generation(batch):
             "claim__trip__patient",
             "claim__trip__provider",
         )
+        .prefetch_related(
+            Prefetch(
+                "claim__service_lines",
+                queryset=ClaimServiceLine.objects.filter(is_active=True).order_by("id"),
+            )
+        )
     )
-    if not rows.exists():
+    if not rows:
         raise ValueError("Batch has no active claims; cannot generate 837P.")
 
     for row in rows:
@@ -94,12 +103,13 @@ def assert_batch_ready_for_837p_generation(batch):
                 "(NM1*IL member ID required for 837P)."
             )
 
-        if not claim.service_lines.filter(is_active=True).exists():
+        service_lines = list(claim.service_lines.all())
+        if not service_lines:
             raise ValueError(
                 f"Claim {claim.claim_number or claim.id} has no active service lines."
             )
 
-        for line in claim.service_lines.filter(is_active=True):
+        for line in service_lines:
             if not (line.procedure_code or "").strip():
                 raise ValueError(
                     f"Claim {claim.claim_number or claim.id} has a service line "

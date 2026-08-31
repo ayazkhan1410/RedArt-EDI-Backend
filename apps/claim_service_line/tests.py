@@ -3,7 +3,7 @@ from decimal import Decimal
 
 from django.urls import reverse
 from rest_framework import status
-from rest_framework.test import APITestCase
+from apps.core.testing import AuthAPITestCase
 
 from apps.claim.models import Claim
 from apps.claim_service_line.models import ClaimServiceLine
@@ -12,8 +12,9 @@ from apps.patient.models import Patient
 from apps.provider_billing_profile.models import ProviderBillingProfile
 
 
-class ClaimServiceLineAPITests(APITestCase):
+class ClaimServiceLineAPITests(AuthAPITestCase):
     def setUp(self):
+        super().setUp()
         self.patient = Patient.objects.create(
             first_name="Ali",
             last_name="Khan",

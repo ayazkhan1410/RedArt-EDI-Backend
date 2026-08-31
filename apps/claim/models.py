@@ -73,17 +73,26 @@ class Claim(BaseModel):
         constraints = [
             models.UniqueConstraint(
                 fields=["claim_number"],
-                condition=models.Q(claim_number__isnull=False),
+                condition=models.Q(
+                    claim_number__isnull=False,
+                    is_active=True,
+                ),
                 name="uniq_claim_claim_number_not_null",
             ),
             models.UniqueConstraint(
                 fields=["external_id"],
-                condition=models.Q(external_id__isnull=False),
+                condition=models.Q(
+                    external_id__isnull=False,
+                    is_active=True,
+                ),
                 name="uniq_claim_external_id_not_null",
             ),
             models.UniqueConstraint(
                 fields=["trip"],
-                condition=models.Q(trip__isnull=False),
+                condition=models.Q(
+                    trip__isnull=False,
+                    is_active=True,
+                ),
                 name="uniq_claim_trip_not_null",
             ),
         ]
@@ -263,7 +272,11 @@ class BatchClaim(BaseModel):
         constraints = [
             models.UniqueConstraint(
                 fields=["batch", "claim"],
-                condition=models.Q(batch__isnull=False, claim__isnull=False),
+                condition=models.Q(
+                    batch__isnull=False,
+                    claim__isnull=False,
+                    is_active=True,
+                ),
                 name="uniq_batch_claim_pair",
             ),
             models.UniqueConstraint(
@@ -271,6 +284,7 @@ class BatchClaim(BaseModel):
                 condition=models.Q(
                     batch__isnull=False,
                     st02__isnull=False,
+                    is_active=True,
                 ),
                 name="uniq_batch_st02",
             ),

@@ -70,6 +70,8 @@ services:
       USE_GUNICORN: "false"
       RUN_MIGRATE_ON_START: "true"
       AUTO_RELOAD: "true"
+      API_REQUIRE_AUTH: "${API_REQUIRE_AUTH:-true}"
+      CORS_ALLOW_ALL_ORIGINS: "${CORS_ALLOW_ALL_ORIGINS:-false}"
       AWS_S3_ENDPOINT_URL: http://minio:9000
     ports:
       # Host 7000 → container 8000
@@ -109,7 +111,7 @@ services:
       POSTGRES_SSLMODE: disable
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/1
-      AUTO_RELOAD: "true"
+      AUTO_RELOAD: "false"
       AWS_S3_ENDPOINT_URL: http://minio:9000
     volumes:
       - .:/app
@@ -141,7 +143,7 @@ services:
       POSTGRES_SSLMODE: disable
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/1
-      AUTO_RELOAD: "true"
+      AUTO_RELOAD: "false"
       AWS_S3_ENDPOINT_URL: http://minio:9000
     volumes:
       - .:/app
@@ -171,6 +173,7 @@ services:
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/1
       FLOWER_PORT: "5555"
+      FLOWER_BASIC_AUTH: "${FLOWER_BASIC_AUTH:-admin:changeme}"
     ports:
       # Host 7003 → container 5555
       - "${FLOWER_HOST_PORT:-7003}:5555"

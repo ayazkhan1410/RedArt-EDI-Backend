@@ -1,7 +1,8 @@
-"""Paramiko SFTP helpers — always close the connection."""
+"""Paramiko SFTP helpers — always close the connection; verify host key when set."""
 
 from __future__ import annotations
 
+import hashlib
 import io
 import logging
 import stat
@@ -9,10 +10,16 @@ from contextlib import contextmanager
 from pathlib import PurePosixPath
 
 import paramiko
+from django.conf import settings
 
+from apps.core.crypto_secrets import decrypt_secret
 from apps.edi.choices import SFTPAuthType
 
 logger = logging.getLogger(__name__)
+
+
+def max_sftp_download_bytes() -> int:
+    return int(getattr(settings, "EDI_MAX_SFTP_DOWNLOAD_BYTES", 5_000_000))
 
 
 @contextmanager
@@ -27,6 +34,8 @@ def open_sftp(credentials):
         transport = paramiko.Transport((credentials.host, int(credentials.port or 22)))
         transport.banner_timeout = credentials.timeout_seconds or 30
         transport.auth_timeout = credentials.timeout_seconds or 30
+        transport.start_client(timeout=credentials.timeout_seconds or 30)
+        _verify_host_key(transport, credentials)
         _connect_transport(transport, credentials)
         sftp = paramiko.SFTPClient.from_transport(transport)
         yield sftp
@@ -43,40 +52,72 @@ def open_sftp(credentials):
                 logger.exception("Failed closing SFTP transport")
 
 
+def _fingerprint_sha256(key) -> str:
+    digest = hashlib.sha256(key.asbytes()).digest()
+    import base64
+
+    b64 = base64.b64encode(digest).decode("ascii").rstrip("=")
+    return f"SHA256:{b64}"
+
+
+def _verify_host_key(transport, credentials):
+    expected = (getattr(credentials, "host_fingerprint", None) or "").strip()
+    require = bool(getattr(settings, "EDI_SFTP_REQUIRE_HOST_FINGERPRINT", True))
+    if not expected:
+        if require and not getattr(settings, "DEBUG", False):
+            raise ValueError(
+                "SFTP host_fingerprint is required before connecting "
+                "(set on credentials or EDI_SFTP_REQUIRE_HOST_FINGERPRINT=false)."
+            )
+        logger.warning(
+            "SFTP host key verification skipped (no fingerprint) host=%s",
+            credentials.host,
+        )
+        return
+
+    key = transport.get_remote_server_key()
+    actual = _fingerprint_sha256(key)
+    # Allow either full SHA256:xxx or bare base64 / hex MD5 legacy forms.
+    expected_norm = expected.strip()
+    actual_bare = actual.split(":", 1)[-1]
+    expected_bare = expected_norm.split(":", 1)[-1].replace(":", "")
+    if expected_norm == actual or expected_bare == actual_bare.replace(":", ""):
+        return
+    # Also accept OpenSSH MD5 colon hex if stored that way.
+    md5 = hashlib.md5(key.asbytes()).hexdigest()
+    md5_colon = ":".join(md5[i : i + 2] for i in range(0, len(md5), 2))
+    if expected_norm.lower() in (md5, md5_colon, f"md5:{md5}"):
+        return
+    raise ValueError(
+        f"SFTP host key mismatch for {credentials.host}: "
+        f"expected {expected_norm}, got {actual}"
+    )
+
+
 def _connect_transport(transport, credentials):
     auth = (credentials.auth_type or SFTPAuthType.PASSWORD).upper()
+    password = decrypt_secret(credentials.password)
+    pem = decrypt_secret(credentials.private_key_pem)
+    passphrase = decrypt_secret(credentials.private_key_passphrase)
+
     if auth == SFTPAuthType.PASSWORD:
-        if not credentials.password:
+        if not password:
             raise ValueError("SFTP password is required for PASSWORD auth.")
-        transport.connect(
-            username=credentials.username,
-            password=credentials.password,
-        )
+        transport.auth_password(credentials.username, password)
     elif auth == SFTPAuthType.PRIVATE_KEY:
-        key = _load_private_key(
-            credentials.private_key_pem,
-            credentials.private_key_passphrase,
-        )
-        transport.connect(username=credentials.username, pkey=key)
+        key = _load_private_key(pem, passphrase)
+        transport.auth_publickey(credentials.username, key)
     elif auth == SFTPAuthType.PASSWORD_AND_KEY:
-        key = _load_private_key(
-            credentials.private_key_pem,
-            credentials.private_key_passphrase,
-        )
-        transport.connect(
-            username=credentials.username,
-            password=credentials.password,
-            pkey=key,
-        )
+        key = _load_private_key(pem, passphrase)
+        try:
+            transport.auth_publickey(credentials.username, key)
+        except paramiko.AuthenticationException:
+            transport.auth_password(credentials.username, password)
     else:
         raise ValueError(f"Unsupported SFTP auth_type: {auth}")
 
 
 def upload_bytes_via_sftp(*, credentials, remote_dir, filename, data: bytes) -> str:
-    """
-    Upload bytes to remote_dir/filename.
-    Returns the remote path used.
-    """
     if not remote_dir:
         raise ValueError("SFTP remote directory is required.")
     if not filename:
@@ -98,10 +139,6 @@ def upload_bytes_via_sftp(*, credentials, remote_dir, filename, data: bytes) -> 
 
 
 def list_remote_files(*, credentials, remote_dir) -> list[dict]:
-    """
-    List regular files in remote_dir.
-    Returns [{"filename", "remote_path", "size", "mtime"}, ...].
-    """
     if not remote_dir:
         raise ValueError("SFTP remote directory is required.")
 
@@ -114,7 +151,6 @@ def list_remote_files(*, credentials, remote_dir) -> list[dict]:
             raise ValueError(f"Remote directory not found: {remote_dir}") from exc
 
         for attr in entries:
-            # Skip directories / specials (paramiko S_ISDIR when available).
             mode = getattr(attr, "st_mode", None)
             if mode is not None and stat.S_ISDIR(mode):
                 continue
@@ -134,14 +170,27 @@ def list_remote_files(*, credentials, remote_dir) -> list[dict]:
 
 
 def download_bytes_via_sftp(*, credentials, remote_path) -> bytes:
-    """Download a remote file into memory."""
     if not remote_path:
         raise ValueError("remote_path is required.")
 
+    limit = max_sftp_download_bytes()
     with open_sftp(credentials) as sftp:
+        try:
+            attrs = sftp.stat(remote_path)
+            size = int(getattr(attrs, "st_size", 0) or 0)
+            if size > limit:
+                raise ValueError(
+                    f"Remote file too large ({size} bytes); max is {limit}."
+                )
+        except OSError as exc:
+            raise ValueError(f"Unable to stat remote path: {remote_path}") from exc
+
         with io.BytesIO() as buf:
             sftp.getfo(remote_path, buf)
             data = buf.getvalue()
+
+    if len(data) > limit:
+        raise ValueError(f"Downloaded file exceeds max size ({limit} bytes).")
 
     logger.info(
         "SFTP download ok host=%s path=%s bytes=%s",
@@ -155,7 +204,6 @@ def download_bytes_via_sftp(*, credentials, remote_path) -> bytes:
 def _load_private_key(pem, passphrase):
     if not pem:
         raise ValueError("private_key_pem is required.")
-    # Paramiko 3.x expects a text file-like for PEM strings (BytesIO breaks).
     if isinstance(pem, str):
         stream = io.StringIO(pem)
     elif isinstance(pem, (bytes, bytearray)):
@@ -163,6 +211,7 @@ def _load_private_key(pem, passphrase):
     else:
         stream = pem
     password = passphrase.encode("utf-8") if passphrase else None
+    errors = []
     for loader in (
         paramiko.RSAKey.from_private_key,
         paramiko.ECDSAKey.from_private_key,
@@ -171,9 +220,12 @@ def _load_private_key(pem, passphrase):
         try:
             stream.seek(0)
             return loader(stream, password=password)
-        except Exception:
+        except Exception as exc:
+            errors.append(f"{loader.__name__}: {exc}")
             continue
-    raise ValueError("Unable to load private key PEM.")
+    raise ValueError(
+        "Unable to load private key PEM (" + "; ".join(errors[:3]) + ")."
+    )
 
 
 def _ensure_remote_dir(sftp, remote_dir):

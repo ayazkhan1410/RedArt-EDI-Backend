@@ -8,7 +8,7 @@ from django.contrib.auth.models import Group
 from django.test import TestCase, override_settings
 from django.urls import reverse
 from rest_framework import status
-from rest_framework.test import APITestCase
+from apps.core.testing import AuthAPITestCase
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from apps.claim.choices import ClaimStatus, DocumentStatus, DocumentType
@@ -25,8 +25,11 @@ from apps.trading_partner.models import TradingPartner
 User = get_user_model()
 
 
-class AuthJWTAPITests(APITestCase):
+class AuthJWTAPITests(AuthAPITestCase):
+    authenticate_by_default = False
+
     def setUp(self):
+        super().setUp()
         self.user = User.objects.create_user(
             username="redart_service",
             password="test-password-123",
@@ -99,8 +102,9 @@ class AuthJWTAPITests(APITestCase):
         self.assertEqual(ok.status_code, status.HTTP_200_OK)
 
 
-class ClaimValidateStatusAPITests(APITestCase):
+class ClaimValidateStatusAPITests(AuthAPITestCase):
     def setUp(self):
+        super().setUp()
         LongDistanceRule.objects.update_or_create(
             county_type="STANDARD",
             defaults={

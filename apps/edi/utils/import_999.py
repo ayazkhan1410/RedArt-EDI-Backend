@@ -40,7 +40,8 @@ def _mark(row: EDI999Import, *, status, message=None, detail=None, finished=Fals
     if message is not None:
         row.message = (message or "")[:500]
     if detail is not None:
-        row.detail = detail
+        # Never persist full stack traces for API/DB leakage; keep a short note.
+        row.detail = (detail or "")[:2000]
     now = timezone.now()
     fields = ["status", "message", "detail", "updated_at"]
     if row.started_at is None and status in (
@@ -128,7 +129,6 @@ def _candidate_filename(name: str) -> bool:
     return bool(_LOOKS_LIKE_999_NAME.search(name))
 
 
-@transaction.atomic
 def discover_edi_999_imports(*, credentials_id=None, batch_id=None):
     """
     List SFTP receiving folders and create DISCOVERED/QUEUED EDI999Import rows.
@@ -153,6 +153,7 @@ def discover_edi_999_imports(*, credentials_id=None, batch_id=None):
             )
             continue
         try:
+            # SFTP I/O must stay outside DB locks — list before atomic writes.
             entries = list_remote_files(
                 credentials=directory.credentials,
                 remote_dir=recv,
@@ -173,41 +174,45 @@ def discover_edi_999_imports(*, credentials_id=None, batch_id=None):
             if not _candidate_filename(filename):
                 continue
 
-            existing = EDI999Import.objects.filter(
-                credentials_id=directory.credentials_id,
-                remote_path=remote_path,
-                is_active=True,
-            ).first()
-            if existing:
-                skipped_existing += 1
-                # Re-queue failed rows for another attempt when polling.
-                if existing.status == EDI999ImportStatus.FAILED:
-                    existing.status = EDI999ImportStatus.QUEUED
-                    existing.message = "Re-queued by 999 import poll."
-                    existing.finished_at = None
-                    existing.save(
-                        update_fields=[
-                            "status",
-                            "message",
-                            "finished_at",
-                            "updated_at",
-                        ]
+            with transaction.atomic():
+                existing = (
+                    EDI999Import.objects.select_for_update()
+                    .filter(
+                        credentials_id=directory.credentials_id,
+                        remote_path=remote_path,
+                        is_active=True,
                     )
-                    created.append(existing)
-                continue
+                    .first()
+                )
+                if existing:
+                    skipped_existing += 1
+                    if existing.status == EDI999ImportStatus.FAILED:
+                        existing.status = EDI999ImportStatus.QUEUED
+                        existing.message = "Re-queued by 999 import poll."
+                        existing.finished_at = None
+                        existing.save(
+                            update_fields=[
+                                "status",
+                                "message",
+                                "finished_at",
+                                "updated_at",
+                            ]
+                        )
+                        created.append(existing)
+                    continue
 
-            row = EDI999Import.objects.create(
-                credentials=directory.credentials,
-                directory=directory,
-                batch_id=batch_id,
-                filename=filename,
-                remote_path=remote_path,
-                status=EDI999ImportStatus.QUEUED,
-                attempt=0,
-                message="Discovered on SFTP; queued for 999 import.",
-                is_active=True,
-            )
-            created.append(row)
+                row = EDI999Import.objects.create(
+                    credentials=directory.credentials,
+                    directory=directory,
+                    batch_id=batch_id,
+                    filename=filename,
+                    remote_path=remote_path,
+                    status=EDI999ImportStatus.QUEUED,
+                    attempt=0,
+                    message="Discovered on SFTP; queued for 999 import.",
+                    is_active=True,
+                )
+                created.append(row)
 
     return created, skipped_existing, errors
 
@@ -217,56 +222,62 @@ def process_edi_999_import(import_id, *, batch_id=None):
     Download one remote 999, parse, persist EDIAcknowledgement, update tracking row.
     Raises on retryable failures; marks SKIPPED for non-retryable junk.
     """
-    row = (
-        EDI999Import.objects.select_related(
-            "credentials",
-            "directory",
-            "batch",
-            "edi_file",
+    with transaction.atomic():
+        row = (
+            EDI999Import.objects.select_for_update()
+            .select_related(
+                "credentials",
+                "directory",
+                "batch",
+                "edi_file",
+            )
+            .filter(pk=import_id, is_active=True)
+            .first()
         )
-        .filter(pk=import_id, is_active=True)
-        .first()
-    )
-    if row is None:
-        raise ValueError("EDI 999 import row not found or inactive.")
+        if row is None:
+            raise ValueError("EDI 999 import row not found or inactive.")
 
-    if row.status == EDI999ImportStatus.IMPORTED:
-        return {
-            "id": row.id,
-            "status": row.status,
-            "acknowledgement_id": row.acknowledgement_id,
-            "skipped": True,
-        }
+        if row.status == EDI999ImportStatus.IMPORTED:
+            return {
+                "id": row.id,
+                "status": row.status,
+                "acknowledgement_id": row.acknowledgement_id,
+                "skipped": True,
+            }
 
-    if not row.credentials_id:
-        _mark(
-            row,
-            status=EDI999ImportStatus.FAILED,
-            message="Missing SFTP credentials on import row.",
-            finished=True,
-        )
-        raise ValueError(row.message)
+        if not row.credentials_id:
+            _mark(
+                row,
+                status=EDI999ImportStatus.FAILED,
+                message="Missing SFTP credentials on import row.",
+                finished=True,
+            )
+            raise ValueError(row.message)
 
-    row.attempt = (row.attempt or 0) + 1
-    row.started_at = row.started_at or timezone.now()
-    row.save(update_fields=["attempt", "started_at", "updated_at"])
+        row.attempt = (row.attempt or 0) + 1
+        row.started_at = row.started_at or timezone.now()
+        row.save(update_fields=["attempt", "started_at", "updated_at"])
+        credentials = row.credentials
+        remote_path = row.remote_path
+        attempt = row.attempt
+        row_id = row.id
 
     _mark(
         row,
         status=EDI999ImportStatus.DOWNLOADING,
-        message=f"Downloading from SFTP (attempt {row.attempt}).",
+        message=f"Downloading from SFTP (attempt {attempt}).",
     )
     try:
         data = download_bytes_via_sftp(
-            credentials=row.credentials,
-            remote_path=row.remote_path,
+            credentials=credentials,
+            remote_path=remote_path,
         )
     except Exception as exc:
         _mark(
             row,
             status=EDI999ImportStatus.FAILED,
             message=str(exc)[:500],
-            detail=traceback.format_exc(),
+            detail=str(exc)[:2000],
             finished=True,
         )
         raise
@@ -318,7 +329,7 @@ def process_edi_999_import(import_id, *, batch_id=None):
             row,
             status=EDI999ImportStatus.SKIPPED,
             message=str(exc)[:500],
-            detail=traceback.format_exc(),
+            detail=str(exc)[:2000],
             finished=True,
         )
         return {"id": row.id, "status": row.status, "skipped": True}
@@ -357,7 +368,7 @@ def process_edi_999_import(import_id, *, batch_id=None):
             row,
             status=EDI999ImportStatus.FAILED,
             message=str(exc)[:500],
-            detail=traceback.format_exc(),
+            detail=str(exc)[:2000],
             finished=True,
         )
         raise
