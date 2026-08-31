@@ -155,6 +155,17 @@ SPECTACULAR_SETTINGS = {
     "TITLE": "RedArt EDI API",
     "DESCRIPTION": "Colorado Medicaid 837P EDI microservice",
     "VERSION": "0.1.0",
+    "ENUM_NAME_OVERRIDES": {
+        "ClaimStatus": "apps.claim.choices.ClaimStatus",
+        "BatchStatus": "apps.claim.choices.BatchStatus",
+        "DocumentStatus": "apps.claim.choices.DocumentStatus",
+        "AttachmentStatus": "apps.claim.choices.AttachmentStatus",
+        "AttachmentSubmissionStatus": "apps.claim.choices.AttachmentSubmissionStatus",
+        "EDIFileStatus": "apps.edi.choices.EDIFileStatus",
+        "TransferLogStatus": "apps.edi.choices.TransferLogStatus",
+        "AcknowledgementStatus": "apps.edi.choices.AcknowledgementStatus",
+        "AcknowledgementType": "apps.edi.choices.AcknowledgementType",
+    },
     "TAGS": [
         {
             "name": "trading_partner",
@@ -183,6 +194,22 @@ SPECTACULAR_SETTINGS = {
         {
             "name": "claim_service_line",
             "description": "Claim service line CRUD (procedure / units / charge).",
+        },
+        {
+            "name": "edi",
+            "description": "EDI control numbers, 837P files, generate/upload, transfer logs, 999 acknowledgements.",
+        },
+        {
+            "name": "edi_acknowledgement",
+            "description": "Inbound 999 acknowledgements (structural accept — not payment).",
+        },
+        {
+            "name": "attachment_submission",
+            "description": "HCPF attachment-channel submissions (separate from 837P).",
+        },
+        {
+            "name": "sftp",
+            "description": "SFTP credentials and remote directories.",
         },
     ],
 }
@@ -224,6 +251,26 @@ EDI_ENVELOPE = {
     "segment_terminator": env("EDI_SEGMENT_TERMINATOR", default="~"),
     "repetition_separator": env("EDI_REPETITION_SEPARATOR", default="^"),
 }
+
+# MinIO / S3 (local docker uses MinIO as S3-compatible store)
+AWS_ACCESS_KEY_ID = env("AWS_ACCESS_KEY_ID", default="minioadmin")
+AWS_SECRET_ACCESS_KEY = env("AWS_SECRET_ACCESS_KEY", default="minioadmin")
+AWS_STORAGE_BUCKET_NAME = env("AWS_STORAGE_BUCKET_NAME", default="edi-files")
+AWS_S3_ENDPOINT_URL = env("AWS_S3_ENDPOINT_URL", default="http://127.0.0.1:9000")
+AWS_S3_REGION_NAME = env("AWS_S3_REGION_NAME", default="us-east-1")
+
+# Billing provider EIN/TIN for 2010AA REF*EI (required when NM1 uses NPI/XX).
+# Replace with real TIN in production; optional provider.tax_id field later.
+EDI_DEFAULT_BILLING_TAX_ID = env("EDI_DEFAULT_BILLING_TAX_ID", default="123456789")
+
+# Optional seed for real/test SFTP (never commit secrets — put in .env)
+SFTP_SEED_NAME = env("SFTP_SEED_NAME", default="SEED-SFTP-CLOUD")
+SFTP_SEED_HOST = env("SFTP_SEED_HOST", default="")
+SFTP_SEED_PORT = env.int("SFTP_SEED_PORT", default=22)
+SFTP_SEED_USERNAME = env("SFTP_SEED_USERNAME", default="")
+SFTP_SEED_PASSWORD = env("SFTP_SEED_PASSWORD", default="")
+SFTP_SEED_SEND_PATH = env("SFTP_SEED_SEND_PATH", default="/send")
+SFTP_SEED_RECV_PATH = env("SFTP_SEED_RECV_PATH", default="/recv")
 
 LOGGING = {
     "version": 1,

@@ -1,14 +1,22 @@
+from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
 
 from apps.claim.choices import (
     AttachmentRoute,
     AttachmentStatus,
+    AttachmentSubmissionStatus,
     BatchStatus,
     ClaimStatus,
     DocumentStatus,
     DocumentType,
 )
-from apps.claim.models import BatchClaim, Claim, ClaimDocument, SubmissionBatch
+from apps.claim.models import (
+    AttachmentSubmission,
+    BatchClaim,
+    Claim,
+    ClaimDocument,
+    SubmissionBatch,
+)
 from apps.claim.utils.validators import clean_optional_text, ensure_non_negative
 from apps.trading_partner.choices import Environment
 from apps.trading_partner.models import TradingPartner
@@ -49,14 +57,17 @@ class ClaimSerializer(serializers.ModelSerializer):
             "updated_at",
         )
 
+    @extend_schema_field(serializers.CharField(allow_null=True))
     def get_trip_label(self, obj):
         if not obj.trip_id:
             return None
         return str(obj.trip)
 
+    @extend_schema_field(serializers.IntegerField(allow_null=True))
     def get_patient_id(self, obj):
         return obj.trip.patient_id if obj.trip_id else None
 
+    @extend_schema_field(serializers.IntegerField(allow_null=True))
     def get_provider_id(self, obj):
         return obj.trip.provider_id if obj.trip_id else None
 
@@ -165,9 +176,11 @@ class ClaimListSerializer(serializers.ModelSerializer):
         )
         read_only_fields = fields
 
+    @extend_schema_field(serializers.IntegerField(allow_null=True))
     def get_patient_id(self, obj):
         return obj.trip.patient_id if obj.trip_id else None
 
+    @extend_schema_field(serializers.IntegerField(allow_null=True))
     def get_provider_id(self, obj):
         return obj.trip.provider_id if obj.trip_id else None
 
@@ -464,6 +477,7 @@ class BatchClaimListSerializer(serializers.ModelSerializer):
         )
         read_only_fields = fields
 
+    @extend_schema_field(serializers.CharField(allow_null=True))
     def get_claim_number(self, obj):
         return obj.claim.claim_number if obj.claim_id else None
 
@@ -483,4 +497,88 @@ class AddClaimToBatchSerializer(serializers.Serializer):
         if not str(value).isdigit():
             raise serializers.ValidationError("st02 must be numeric.")
         return value.zfill(4) if len(value) <= 4 else value
+
+
+class AttachmentSubmissionSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = AttachmentSubmission
+        fields = (
+            "id",
+            "claim",
+            "channel",
+            "submission_reference",
+            "status",
+            "submitted_at",
+            "confirmed_at",
+            "notes",
+            "is_active",
+            "created_at",
+            "updated_at",
+        )
+        read_only_fields = ("id", "created_at", "updated_at")
+
+    def validate_channel(self, value):
+        if value in (None, ""):
+            return AttachmentRoute.HCPF_PORTAL
+        value = str(value).strip().upper()
+        if value not in AttachmentRoute.values:
+            raise serializers.ValidationError("Invalid channel.")
+        if value == AttachmentRoute.NONE:
+            raise serializers.ValidationError(
+                "channel cannot be NONE for an attachment submission."
+            )
+        return value
+
+    def validate_status(self, value):
+        if value in (None, ""):
+            return AttachmentSubmissionStatus.QUEUED
+        value = str(value).strip().upper()
+        if value not in AttachmentSubmissionStatus.values:
+            raise serializers.ValidationError("Invalid attachment submission status.")
+        return value
+
+    def validate_submission_reference(self, value):
+        return clean_optional_text(value)
+
+    def validate_notes(self, value):
+        return clean_optional_text(value)
+
+    def validate_claim(self, value):
+        if value is None:
+            raise serializers.ValidationError("claim is required.")
+        if not value.is_active:
+            raise serializers.ValidationError("Claim not found or inactive.")
+        if not value.attachment_required:
+            raise serializers.ValidationError(
+                "Claim does not require attachments (attachment_required=False)."
+            )
+        return value
+
+
+class AttachmentSubmissionListSerializer(serializers.ModelSerializer):
+    claim_number = serializers.SerializerMethodField()
+
+    class Meta:
+        model = AttachmentSubmission
+        fields = (
+            "id",
+            "claim",
+            "claim_number",
+            "channel",
+            "submission_reference",
+            "status",
+            "submitted_at",
+            "confirmed_at",
+            "is_active",
+            "created_at",
+        )
+        read_only_fields = fields
+
+    @extend_schema_field(serializers.CharField(allow_null=True))
+    def get_claim_number(self, obj):
+        return obj.claim.claim_number if obj.claim_id else None
+
+
+class AttachmentSubmissionIdSerializer(serializers.Serializer):
+    id = serializers.IntegerField(read_only=True)
 

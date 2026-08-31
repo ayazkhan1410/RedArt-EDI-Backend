@@ -2,10 +2,14 @@ from django.db import models
 
 from apps.core.models import BaseModel
 from apps.edi.choices import (
+    AcknowledgementStatus,
+    AcknowledgementType,
     EDIFileStatus,
     SFTPAuthType,
     SFTPDirectoryPurpose,
     TransactionType,
+    TransferChannel,
+    TransferLogStatus,
 )
 from apps.trading_partner.choices import Environment
 
@@ -164,6 +168,141 @@ class EDIFile(BaseModel):
 
     def __str__(self):
         return self.filename or f"EDIFile {self.pk}"
+
+
+class EDIFileTransferLogQuerySet(models.QuerySet):
+    def with_relations(self):
+        return self.select_related(
+            "edi_file",
+            "edi_file__batch",
+            "edi_file__batch__trading_partner",
+        )
+
+
+class EDIFileTransferLog(BaseModel):
+    """
+    Per-channel upload attempt trail (SFTP / S3) for FE and ops.
+    One EDIFile can have many log rows across retries.
+    """
+
+    edi_file = models.ForeignKey(
+        EDIFile,
+        on_delete=models.CASCADE,
+        related_name="transfer_logs",
+    )
+    channel = models.CharField(
+        max_length=16,
+        choices=TransferChannel.choices,
+    )
+    status = models.CharField(
+        max_length=32,
+        choices=TransferLogStatus.choices,
+        default=TransferLogStatus.PENDING,
+    )
+    attempt = models.PositiveIntegerField(default=1)
+    remote_path = models.CharField(max_length=1024, null=True, blank=True)
+    message = models.CharField(max_length=500, null=True, blank=True)
+    detail = models.TextField(null=True, blank=True)
+    celery_task_id = models.CharField(max_length=255, null=True, blank=True)
+    started_at = models.DateTimeField(null=True, blank=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+    is_active = models.BooleanField(default=True)
+
+    objects = EDIFileTransferLogQuerySet.as_manager()
+
+    class Meta:
+        verbose_name = "EDI File Transfer Log"
+        verbose_name_plural = "EDI File Transfer Logs"
+        ordering = ("-id",)
+        indexes = [
+            models.Index(
+                fields=["edi_file", "channel"],
+                name="edi_xfer_file_channel_idx",
+            ),
+            models.Index(
+                fields=["status", "is_active"],
+                name="edi_xfer_status_active_idx",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.channel} {self.status} #{self.pk}"
+
+
+class EDIAcknowledgementQuerySet(models.QuerySet):
+    def with_relations(self):
+        return self.select_related(
+            "batch",
+            "batch__trading_partner",
+            "edi_file",
+            "edi_file__batch",
+        )
+
+
+class EDIAcknowledgement(BaseModel):
+    """
+    Inbound acknowledgement (typically 999) for a submission batch / ST02.
+    ACCEPTED means structural accept of the EDI — not payment.
+    """
+
+    batch = models.ForeignKey(
+        "claim.SubmissionBatch",
+        on_delete=models.PROTECT,
+        related_name="edi_acknowledgements",
+        null=True,
+        blank=True,
+    )
+    edi_file = models.ForeignKey(
+        EDIFile,
+        on_delete=models.SET_NULL,
+        related_name="acknowledgements",
+        null=True,
+        blank=True,
+    )
+    ack_type = models.CharField(
+        max_length=16,
+        choices=AcknowledgementType.choices,
+        default=AcknowledgementType.X999,
+    )
+    status = models.CharField(
+        max_length=32,
+        choices=AcknowledgementStatus.choices,
+        default=AcknowledgementStatus.ACCEPTED,
+    )
+    affected_st02 = models.CharField(
+        max_length=16,
+        null=True,
+        blank=True,
+        help_text="Transaction set control number (ST02) affected by this ack.",
+    )
+    raw_file_ref = models.CharField(max_length=1024, null=True, blank=True)
+    message = models.CharField(max_length=500, null=True, blank=True)
+    acknowledged_at = models.DateTimeField(null=True, blank=True)
+    is_active = models.BooleanField(default=True)
+
+    objects = EDIAcknowledgementQuerySet.as_manager()
+
+    class Meta:
+        verbose_name = "EDI Acknowledgement"
+        verbose_name_plural = "EDI Acknowledgements"
+        ordering = ("-id",)
+        indexes = [
+            models.Index(
+                fields=["batch", "ack_type"],
+                name="edi_ack_batch_type_idx",
+            ),
+            models.Index(
+                fields=["status", "is_active"],
+                name="edi_ack_status_active_idx",
+            ),
+            models.Index(
+                fields=["affected_st02"],
+                name="edi_ack_st02_idx",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.ack_type} {self.status} ST02={self.affected_st02} #{self.pk}"
 
 
 class SFTPCredentialsQuerySet(models.QuerySet):

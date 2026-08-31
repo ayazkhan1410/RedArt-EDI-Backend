@@ -4,15 +4,22 @@ from decimal import Decimal
 
 from django.db import transaction
 from django.db.models import Count, Sum
+from django.utils import timezone
 
 from apps.claim.choices import (
     AttachmentRoute,
     AttachmentStatus,
+    AttachmentSubmissionStatus,
     ClaimStatus,
     DocumentStatus,
     DocumentType,
 )
-from apps.claim.models import BatchClaim, Claim, ClaimDocument, SubmissionBatch
+from apps.claim.models import (
+    BatchClaim,
+    Claim,
+    ClaimDocument,
+    SubmissionBatch,
+)
 from apps.claim_service_line.models import ClaimServiceLine
 from apps.long_distance_rule.utils.service import evaluate_trip_mileage
 from apps.nemt_trip.models import NemtTrip
@@ -113,6 +120,7 @@ def sync_claim_document_status(claim):
 
     snapshot = evaluate_claim_documents(claim)
     terminal = {
+        ClaimStatus.EDI_SENT,
         ClaimStatus.EDI_ACCEPTED,
         ClaimStatus.UNDER_REVIEW,
         ClaimStatus.PAID,
@@ -272,3 +280,61 @@ def create_claim_from_trip(
         )
 
     return claim, line
+
+
+@transaction.atomic
+def sync_claim_from_attachment_submission(submission):
+    """
+    Mirror AttachmentSubmission onto Claim.attachment_status.
+    Never re-decides attachment_required. Never sets PAID.
+    """
+    if submission is None or not submission.claim_id:
+        return None
+
+    claim = Claim.objects.select_for_update().filter(pk=submission.claim_id).first()
+    if claim is None:
+        return None
+
+    status = submission.status
+    update_fields = ["attachment_status", "updated_at"]
+
+    if status == AttachmentSubmissionStatus.CONFIRMED:
+        claim.attachment_status = AttachmentStatus.CONFIRMED
+        if submission.confirmed_at is None:
+            submission.confirmed_at = timezone.now()
+            submission.save(update_fields=["confirmed_at", "updated_at"])
+        if claim.status in (
+            ClaimStatus.ATTACHMENT_REQUIRED,
+            ClaimStatus.ATTACHMENT_QUEUED,
+            ClaimStatus.ATTACHMENT_SUBMITTED,
+            ClaimStatus.DOCUMENTS_COMPLETE,
+            ClaimStatus.DOCUMENTS_REQUIRED,
+        ):
+            claim.status = ClaimStatus.ATTACHMENT_CONFIRMED
+            update_fields.append("status")
+    elif status == AttachmentSubmissionStatus.SUBMITTED:
+        claim.attachment_status = AttachmentStatus.SUBMITTED
+        if submission.submitted_at is None:
+            submission.submitted_at = timezone.now()
+            submission.save(update_fields=["submitted_at", "updated_at"])
+        if claim.status in (
+            ClaimStatus.ATTACHMENT_REQUIRED,
+            ClaimStatus.ATTACHMENT_QUEUED,
+            ClaimStatus.DOCUMENTS_COMPLETE,
+        ):
+            claim.status = ClaimStatus.ATTACHMENT_SUBMITTED
+            update_fields.append("status")
+    elif status == AttachmentSubmissionStatus.QUEUED:
+        claim.attachment_status = AttachmentStatus.QUEUED
+        if claim.status in (
+            ClaimStatus.ATTACHMENT_REQUIRED,
+            ClaimStatus.DOCUMENTS_COMPLETE,
+            ClaimStatus.READY_FOR_837P,
+        ):
+            claim.status = ClaimStatus.ATTACHMENT_QUEUED
+            update_fields.append("status")
+    elif status == AttachmentSubmissionStatus.FAILED:
+        claim.attachment_status = AttachmentStatus.FAILED
+
+    claim.save(update_fields=update_fields)
+    return claim

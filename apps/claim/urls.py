@@ -1,5 +1,9 @@
 from django.urls import path
 
+from apps.claim.attachment_views import (
+    AttachmentSubmissionDetailAPIView,
+    AttachmentSubmissionListCreateAPIView,
+)
 from apps.claim.batch_views import (
     BatchClaimDetailAPIView,
     BatchClaimListCreateAPIView,
@@ -40,6 +44,16 @@ urlpatterns = [
         "claim-documents/<int:pk>/",
         ClaimDocumentDetailAPIView.as_view(),
         name="claim-document-detail",
+    ),
+    path(
+        "attachment-submissions/",
+        AttachmentSubmissionListCreateAPIView.as_view(),
+        name="attachment-submission-list-create",
+    ),
+    path(
+        "attachment-submissions/<int:pk>/",
+        AttachmentSubmissionDetailAPIView.as_view(),
+        name="attachment-submission-detail",
     ),
     path(
         "submission-batches/",

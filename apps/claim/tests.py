@@ -276,3 +276,30 @@ class ClaimDocumentAndBatchTests(ClaimFixturesMixin, APITestCase):
             "150.00",
         )
         self.assertEqual(BatchClaim.objects.filter(batch_id=batch_id).count(), 1)
+
+    def test_attachment_submission_confirms_claim_attachment_status(self):
+        self._create_doc("STANDARD_TRIP_LOG", "trip_log_C001.pdf", "HASH111")
+        self._create_doc("MILE_25_VERIFICATION", "verification_C001.pdf", "HASH222")
+        self.claim.refresh_from_db()
+        self.assertTrue(self.claim.attachment_required)
+
+        response = self.client.post(
+            reverse("attachment-submission-list-create"),
+            {
+                "claim": self.claim.id,
+                "channel": "HCPF_PORTAL",
+                "submission_reference": "HCPF-ATT-789",
+                "status": "CONFIRMED",
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.claim.refresh_from_db()
+        self.assertEqual(self.claim.attachment_status, AttachmentStatus.CONFIRMED)
+
+        listed = self.client.get(
+            reverse("attachment-submission-list-create"),
+            {"claim_id": self.claim.id},
+        )
+        self.assertEqual(listed.status_code, status.HTTP_200_OK)
+        self.assertGreaterEqual(listed.data["count"], 1)

@@ -10,7 +10,7 @@ app.config_from_object("django.conf:settings", namespace="CELERY")
 app.autodiscover_tasks()
 
 # Ensure project tasks are imported (project package is not a Django app).
-app.conf.imports = ("redartdigital.tasks",)
+app.conf.imports = ("redartdigital.tasks", "apps.edi.tasks")
 
 # Fallback schedule (also registered into django-celery-beat DB on web startup).
 app.conf.beat_schedule = {

@@ -19,7 +19,7 @@ from rest_framework.views import APIView
 from apps.claim.utils.validators import parse_optional_int
 from apps.core.pagination import StandardPagination
 from apps.core.utils.responses import error_response, success_response
-from apps.edi.models import EDIControlNumber, EDIFile
+from apps.edi.models import EDIControlNumber, EDIFile, EDIFileTransferLog
 from apps.edi.serializers import (
     AllocateControlNumberSerializer,
     CreateEDIFileFromBatchSerializer,
@@ -29,13 +29,20 @@ from apps.edi.serializers import (
     EDIFileIdSerializer,
     EDIFileListSerializer,
     EDIFileSerializer,
+    EDIFileTransferLogListSerializer,
+    EDIFileTransferLogSerializer,
+    Generate837PSerializer,
     MarkEDIFileUploadedSerializer,
+    QueueEDIFileUploadSerializer,
 )
+from apps.edi.tasks import upload_edi_file
+from apps.edi.utils.handler import Generate837PHandler
 from apps.edi.utils.service import (
     allocate_control_numbers,
     create_edi_file_for_batch,
     mark_edi_file_uploaded,
 )
+from apps.edi.utils.upload import queue_edi_file_upload
 
 logger = logging.getLogger(__name__)
 
@@ -685,5 +692,201 @@ class EDIFileMarkUploadedAPIView(APIView):
             )
             return error_response(
                 "Unable to mark EDI file as uploaded.",
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+
+class EDIFileGenerate837PAPIView(APIView):
+    @extend_schema(
+        tags=[FILE_TAG],
+        request=Generate837PSerializer,
+        examples=[
+            OpenApiExample(
+                "Generate 837P",
+                value={"batch_id": 1, "allocate_controls": True},
+                request_only=True,
+            )
+        ],
+        responses={201: EDIFileIdSerializer},
+    )
+    def post(self, request):
+        try:
+            serializer = Generate837PSerializer(data=request.data)
+            if not serializer.is_valid():
+                return error_response("Validation failed.", errors=serializer.errors)
+            data = serializer.validated_data
+            handler = Generate837PHandler(
+                data["batch_id"],
+                allocate_controls=data.get("allocate_controls", True),
+            )
+            edi_file, _payload, _body = handler.generate()
+            return success_response(
+                "837P generated successfully.",
+                data={
+                    "id": edi_file.id,
+                    "filename": edi_file.filename,
+                    "file_hash": edi_file.file_hash,
+                    "path_or_blob_ref": edi_file.path_or_blob_ref,
+                    "status": edi_file.status,
+                    "control_number_id": edi_file.control_number_id,
+                },
+                status_code=status.HTTP_201_CREATED,
+            )
+        except ValueError as exc:
+            return error_response(str(exc), status_code=status.HTTP_400_BAD_REQUEST)
+        except IntegrityError:
+            return error_response(
+                "Unable to generate 837P due to a conflict.",
+                status_code=status.HTTP_409_CONFLICT,
+            )
+        except Exception:
+            logger.error("Generate 837P failed:\n%s", traceback.format_exc())
+            return error_response(
+                "Unable to generate 837P.",
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+
+class EDIFileQueueUploadAPIView(APIView):
+    @extend_schema(
+        tags=[FILE_TAG],
+        request=QueueEDIFileUploadSerializer,
+        examples=[
+            OpenApiExample(
+                "Queue upload",
+                value={"credentials_id": None},
+                request_only=True,
+            )
+        ],
+        responses={202: EDIFileIdSerializer},
+    )
+    def post(self, request, pk):
+        try:
+            serializer = QueueEDIFileUploadSerializer(data=request.data or {})
+            if not serializer.is_valid():
+                return error_response("Validation failed.", errors=serializer.errors)
+            credentials_id = serializer.validated_data.get("credentials_id")
+            edi_file, attempt, sftp_log, s3_log = queue_edi_file_upload(
+                edi_file_id=pk,
+                credentials_id=credentials_id,
+            )
+            async_result = upload_edi_file.delay(
+                edi_file.id,
+                attempt,
+                credentials_id,
+            )
+            for log in (sftp_log, s3_log):
+                log.celery_task_id = async_result.id
+                log.save(update_fields=["celery_task_id", "updated_at"])
+
+            return success_response(
+                "EDI file upload queued.",
+                data={
+                    "id": edi_file.id,
+                    "status": edi_file.status,
+                    "attempt": attempt,
+                    "celery_task_id": async_result.id,
+                    "transfer_log_ids": [sftp_log.id, s3_log.id],
+                },
+                status_code=status.HTTP_202_ACCEPTED,
+            )
+        except ValueError as exc:
+            return error_response(str(exc), status_code=status.HTTP_400_BAD_REQUEST)
+        except Exception:
+            logger.error(
+                "Queue EDI upload id=%s failed:\n%s", pk, traceback.format_exc()
+            )
+            return error_response(
+                "Unable to queue EDI file upload.",
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+
+class EDIFileTransferLogListAPIView(APIView):
+    @extend_schema(
+        tags=[FILE_TAG],
+        parameters=[
+            OpenApiParameter("page", int, required=False),
+            OpenApiParameter("page_size", int, required=False),
+            OpenApiParameter("edi_file_id", int, required=False),
+            OpenApiParameter("channel", str, required=False),
+            OpenApiParameter("status", str, required=False),
+            OpenApiParameter("include_inactive", str, required=False),
+        ],
+        responses={200: EDIFileTransferLogListSerializer(many=True)},
+    )
+    def get(self, request):
+        try:
+            rows = EDIFileTransferLog.objects.with_relations().order_by("-id")
+            if request.query_params.get("include_inactive", "").lower() not in (
+                "1",
+                "true",
+                "yes",
+            ):
+                rows = rows.filter(is_active=True)
+
+            edi_file_id = parse_optional_int(
+                request.query_params.get("edi_file_id"), "edi_file_id"
+            )
+            if edi_file_id:
+                rows = rows.filter(edi_file_id=edi_file_id)
+
+            channel = request.query_params.get("channel", "").strip().upper()
+            if channel:
+                rows = rows.filter(channel=channel)
+
+            status_filter = request.query_params.get("status", "").strip().upper()
+            if status_filter:
+                rows = rows.filter(status=status_filter)
+
+            paginator = StandardPagination()
+            page = paginator.paginate_queryset(rows, request, view=self)
+            data = EDIFileTransferLogListSerializer(page, many=True).data
+            return Response(
+                {
+                    "success": True,
+                    "message": "Transfer logs retrieved successfully.",
+                    "count": paginator.page.paginator.count,
+                    "next": paginator.get_next_link(),
+                    "previous": paginator.get_previous_link(),
+                    "data": data,
+                }
+            )
+        except ValidationError as exc:
+            return error_response("Validation failed.", errors=exc.detail)
+        except Exception:
+            logger.error("List transfer logs failed:\n%s", traceback.format_exc())
+            return error_response(
+                "Unable to list transfer logs.",
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+
+class EDIFileTransferLogDetailAPIView(APIView):
+    @extend_schema(
+        tags=[FILE_TAG],
+        responses={200: EDIFileTransferLogSerializer},
+    )
+    def get(self, request, pk):
+        try:
+            row = get_object_or_404(
+                EDIFileTransferLog.objects.with_relations(),
+                pk=pk,
+            )
+            return success_response(
+                "Transfer log retrieved successfully.",
+                data=EDIFileTransferLogSerializer(row).data,
+            )
+        except Http404:
+            return error_response(
+                "Transfer log not found.",
+                status_code=status.HTTP_404_NOT_FOUND,
+            )
+        except Exception:
+            logger.error(
+                "Get transfer log id=%s failed:\n%s", pk, traceback.format_exc()
+            )
+            return error_response(
+                "Unable to retrieve transfer log.",
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )

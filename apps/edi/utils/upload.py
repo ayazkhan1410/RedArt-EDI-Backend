@@ -1,0 +1,323 @@
+"""Queue and run EDI file uploads (SFTP + MinIO) with transfer logs."""
+
+from __future__ import annotations
+
+import logging
+import traceback
+from pathlib import Path
+
+from django.conf import settings
+from django.db import transaction
+from django.utils import timezone
+
+from apps.edi.choices import (
+    EDIFileStatus,
+    SFTPDirectoryPurpose,
+    TransferChannel,
+    TransferLogStatus,
+)
+from apps.edi.models import EDIFile, EDIFileTransferLog, SFTPDirectory
+from apps.edi.utils.s3_client import upload_bytes_to_s3
+from apps.edi.utils.sftp_client import upload_bytes_via_sftp
+from apps.edi.utils.service import mark_edi_file_uploaded
+
+logger = logging.getLogger(__name__)
+
+
+def resolve_outbound_directory(*, trading_partner_id=None, credentials_id=None):
+    qs = SFTPDirectory.objects.with_relations().filter(
+        is_active=True,
+        purpose=SFTPDirectoryPurpose.OUTBOUND_837P,
+        credentials__is_active=True,
+    )
+    if credentials_id:
+        qs = qs.filter(credentials_id=credentials_id)
+    elif trading_partner_id:
+        qs = qs.filter(credentials__trading_partner_id=trading_partner_id)
+    directory = qs.order_by("-id").first()
+    if directory is None:
+        # Fall back to GENERAL send/recv seed row.
+        qs = SFTPDirectory.objects.with_relations().filter(
+            is_active=True,
+            credentials__is_active=True,
+        )
+        if credentials_id:
+            qs = qs.filter(credentials_id=credentials_id)
+        elif trading_partner_id:
+            qs = qs.filter(credentials__trading_partner_id=trading_partner_id)
+        directory = qs.order_by("-id").first()
+    if directory is None:
+        raise ValueError("No active SFTP directory configured for upload.")
+    return directory
+
+
+def _candidate_local_paths(edi_file: EDIFile):
+    """Possible on-disk locations for a generated 837P file."""
+    media = Path(settings.MEDIA_ROOT)
+    paths = []
+    ref = (edi_file.path_or_blob_ref or "").strip()
+    if ref and not ref.startswith("s3://") and "://" not in ref:
+        paths.append(media / ref)
+    if edi_file.filename and edi_file.batch_id:
+        paths.append(media / "edi" / "837p" / str(edi_file.batch_id) / edi_file.filename)
+    if edi_file.filename:
+        paths.append(media / "edi" / "837p" / edi_file.filename)
+    # Deduplicate while preserving order
+    seen = set()
+    unique = []
+    for path in paths:
+        key = str(path)
+        if key not in seen:
+            seen.add(key)
+            unique.append(path)
+    return unique
+
+
+def _download_s3_bytes(s3_uri: str) -> bytes:
+    """Download s3://bucket/key via MinIO/S3 client."""
+    without = s3_uri[len("s3://") :]
+    bucket, _, key = without.partition("/")
+    if not bucket or not key:
+        raise ValueError(f"Invalid S3 URI: {s3_uri}")
+    from apps.edi.utils.s3_client import get_s3_client
+
+    client = get_s3_client()
+    obj = client.get_object(Bucket=bucket, Key=key)
+    return obj["Body"].read()
+
+
+def read_edi_file_bytes(edi_file: EDIFile) -> bytes:
+    """
+    Load EDI bytes for upload.
+    Prefers local MEDIA_ROOT; repairs path_or_blob_ref if an older upload
+    overwrote it with an s3:// URI; falls back to S3 download.
+    """
+    for path in _candidate_local_paths(edi_file):
+        if path.is_file():
+            try:
+                rel = str(path.relative_to(settings.MEDIA_ROOT)).replace("\\", "/")
+            except ValueError:
+                rel = str(path)
+            if edi_file.path_or_blob_ref != rel:
+                EDIFile.objects.filter(pk=edi_file.id).update(
+                    path_or_blob_ref=rel,
+                    updated_at=timezone.now(),
+                )
+                edi_file.path_or_blob_ref = rel
+                logger.info(
+                    "Repaired EDIFile id=%s path_or_blob_ref -> %s",
+                    edi_file.id,
+                    rel,
+                )
+            return path.read_bytes()
+
+    ref = (edi_file.path_or_blob_ref or "").strip()
+    if ref.startswith("s3://"):
+        logger.info("Reading EDIFile id=%s from S3 URI %s", edi_file.id, ref)
+        return _download_s3_bytes(ref)
+
+    raise ValueError(
+        "EDI file missing on disk"
+        + (f": {ref}" if ref else " (no path_or_blob_ref).")
+    )
+
+
+@transaction.atomic
+def queue_edi_file_upload(*, edi_file_id, credentials_id=None):
+    """
+    Mark file UPLOAD_QUEUED and create PENDING transfer log rows.
+    Allows resend after GENERATED / FAILED / UPLOADED / UPLOAD_QUEUED.
+    Returns (edi_file, attempt, sftp_log, s3_log).
+    """
+    edi_file = (
+        EDIFile.objects.select_for_update(of=("self",))
+        .select_related("batch", "batch__trading_partner")
+        .filter(pk=edi_file_id, is_active=True)
+        .first()
+    )
+    if edi_file is None:
+        raise ValueError("EDI file not found or inactive.")
+
+    allowed = {
+        EDIFileStatus.GENERATED,
+        EDIFileStatus.FAILED,
+        EDIFileStatus.UPLOAD_QUEUED,
+        EDIFileStatus.UPLOADED,
+    }
+    if edi_file.status not in allowed:
+        raise ValueError(
+            f"EDI file status {edi_file.status} cannot be queued for upload."
+        )
+
+    last_attempt = (
+        EDIFileTransferLog.objects.filter(edi_file_id=edi_file.id)
+        .order_by("-attempt")
+        .values_list("attempt", flat=True)
+        .first()
+    )
+    attempt = (last_attempt or 0) + 1
+
+    edi_file.status = EDIFileStatus.UPLOAD_QUEUED
+    edi_file.save(update_fields=["status", "updated_at"])
+
+    sftp_log = EDIFileTransferLog.objects.create(
+        edi_file=edi_file,
+        channel=TransferChannel.SFTP,
+        status=TransferLogStatus.PENDING,
+        attempt=attempt,
+        message=f"Queued for SFTP upload (attempt {attempt}).",
+        is_active=True,
+    )
+    s3_log = EDIFileTransferLog.objects.create(
+        edi_file=edi_file,
+        channel=TransferChannel.S3,
+        status=TransferLogStatus.PENDING,
+        attempt=attempt,
+        message=f"Queued for MinIO/S3 upload (attempt {attempt}).",
+        is_active=True,
+    )
+    return edi_file, attempt, sftp_log, s3_log
+
+
+def _mark_log(log, *, status, message, detail=None, remote_path=None, task_id=None):
+    now = timezone.now()
+    if log.started_at is None and status == TransferLogStatus.IN_PROGRESS:
+        log.started_at = now
+    if status in (TransferLogStatus.SUCCESS, TransferLogStatus.FAILED):
+        log.finished_at = now
+        if log.started_at is None:
+            log.started_at = now
+    log.status = status
+    log.message = (message or "")[:500]
+    if detail is not None:
+        log.detail = detail
+    if remote_path is not None:
+        log.remote_path = remote_path
+    if task_id is not None:
+        log.celery_task_id = task_id
+    log.save()
+    return log
+
+
+def run_edi_file_upload(*, edi_file_id, attempt, task_id=None, credentials_id=None):
+    """
+    Perform SFTP then MinIO uploads for one attempt.
+    Updates transfer logs and EDIFile status.
+    """
+    edi_file = (
+        EDIFile.objects.select_related("batch", "batch__trading_partner")
+        .filter(pk=edi_file_id, is_active=True)
+        .first()
+    )
+    if edi_file is None:
+        raise ValueError("EDI file not found or inactive.")
+
+    logs = {
+        row.channel: row
+        for row in EDIFileTransferLog.objects.filter(
+            edi_file_id=edi_file.id,
+            attempt=attempt,
+            is_active=True,
+        )
+    }
+    sftp_log = logs.get(TransferChannel.SFTP)
+    s3_log = logs.get(TransferChannel.S3)
+    if sftp_log is None or s3_log is None:
+        raise ValueError("Transfer logs missing for this upload attempt.")
+
+    data = read_edi_file_bytes(edi_file)
+    partner_id = edi_file.batch.trading_partner_id if edi_file.batch_id else None
+    directory = resolve_outbound_directory(
+        trading_partner_id=partner_id,
+        credentials_id=credentials_id,
+    )
+    credentials = directory.credentials
+    filename = edi_file.filename
+    send_path = directory.sending_path or "/send"
+
+    sftp_ok = False
+    s3_ok = False
+    s3_uri = None
+    remote_sftp = None
+
+    _mark_log(
+        sftp_log,
+        status=TransferLogStatus.IN_PROGRESS,
+        message="Uploading to SFTP…",
+        task_id=task_id,
+    )
+    try:
+        remote_sftp = upload_bytes_via_sftp(
+            credentials=credentials,
+            remote_dir=send_path,
+            filename=filename,
+            data=data,
+        )
+        _mark_log(
+            sftp_log,
+            status=TransferLogStatus.SUCCESS,
+            message="Uploaded to SFTP successfully.",
+            remote_path=remote_sftp,
+            task_id=task_id,
+        )
+        sftp_ok = True
+    except Exception as exc:
+        _mark_log(
+            sftp_log,
+            status=TransferLogStatus.FAILED,
+            message=str(exc)[:500],
+            detail=traceback.format_exc(),
+            task_id=task_id,
+        )
+        logger.exception("SFTP upload failed edi_file_id=%s", edi_file_id)
+
+    _mark_log(
+        s3_log,
+        status=TransferLogStatus.IN_PROGRESS,
+        message="Uploading to MinIO/S3…",
+        task_id=task_id,
+    )
+    try:
+        key = f"edi/837p/{edi_file.batch_id or 'unknown'}/{filename}"
+        s3_uri = upload_bytes_to_s3(key=key, data=data)
+        _mark_log(
+            s3_log,
+            status=TransferLogStatus.SUCCESS,
+            message="Uploaded to MinIO/S3 successfully.",
+            remote_path=s3_uri,
+            task_id=task_id,
+        )
+        s3_ok = True
+    except Exception as exc:
+        _mark_log(
+            s3_log,
+            status=TransferLogStatus.FAILED,
+            message=str(exc)[:500],
+            detail=traceback.format_exc(),
+            task_id=task_id,
+        )
+        logger.exception("S3 upload failed edi_file_id=%s", edi_file_id)
+
+    if sftp_ok and s3_ok:
+        # Keep local media path on EDIFile so retries/resends can re-read the file.
+        # S3 URI is stored on the S3 transfer log (remote_path).
+        mark_edi_file_uploaded(edi_file.id)
+        return {
+            "edi_file_id": edi_file.id,
+            "status": EDIFileStatus.UPLOADED,
+            "sftp_path": remote_sftp,
+            "s3_uri": s3_uri,
+            "attempt": attempt,
+        }
+
+    EDIFile.objects.filter(pk=edi_file.id).update(
+        status=EDIFileStatus.FAILED,
+        updated_at=timezone.now(),
+    )
+    return {
+        "edi_file_id": edi_file.id,
+        "status": EDIFileStatus.FAILED,
+        "sftp_ok": sftp_ok,
+        "s3_ok": s3_ok,
+        "attempt": attempt,
+    }
