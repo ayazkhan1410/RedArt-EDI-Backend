@@ -172,3 +172,179 @@ def parse_999(raw: str) -> dict:
         "isa13": _el(isa, 13),
         "gs08": _el(gs, 8),
     }
+
+
+# CLP02 → claim outcome (HIPAA 835).
+_CLP_PAID_CODES = frozenset({"1", "2", "3", "19", "20", "21"})
+_CLP_DENIED_CODES = frozenset({"4"})
+_CLP_REVIEW_CODES = frozenset({"22", "23", "25"})
+
+
+def map_835_clp_outcome(clp02: str, payment_amount) -> str:
+    """
+    Map CLP02 (+ payment amount) to RemittanceClaimOutcome.
+    Paid only when status is a processed-as-* code and payment > 0.
+    """
+    from decimal import Decimal
+
+    from apps.edi.choices import RemittanceClaimOutcome
+
+    code = str(clp02 or "").strip()
+    try:
+        amount = Decimal(str(payment_amount if payment_amount is not None else "0"))
+    except Exception:
+        amount = Decimal("0")
+
+    if code in _CLP_DENIED_CODES:
+        return RemittanceClaimOutcome.DENIED
+    if code in _CLP_PAID_CODES:
+        if amount > 0:
+            return RemittanceClaimOutcome.PAID
+        # Processed but $0 — treat as denial-like for Medicaid ERA simplicity.
+        return RemittanceClaimOutcome.DENIED
+    if code in _CLP_REVIEW_CODES:
+        return RemittanceClaimOutcome.UNDER_REVIEW
+    return RemittanceClaimOutcome.IGNORED
+
+
+def _parse_decimal(value):
+    from decimal import Decimal, InvalidOperation
+
+    if value in (None, ""):
+        return None
+    try:
+        return Decimal(str(value).strip())
+    except (InvalidOperation, ValueError):
+        return None
+
+
+def _parse_ccyymmdd(value):
+    from datetime import datetime
+
+    text = str(value or "").strip()
+    if len(text) == 8 and text.isdigit():
+        try:
+            return datetime.strptime(text, "%Y%m%d").date()
+        except ValueError:
+            return None
+    return None
+
+
+def parse_835(raw: str) -> dict:
+    """
+    Parse a minimal 835 ERA into header fields + CLP claim lines.
+
+    Returns:
+      {
+        "isa13", "gs06", "st02", "trace_number", "payment_method",
+        "total_payment", "payment_date", "message", "claims": [
+          {
+            "claim_number", "clp_status_code", "outcome",
+            "charge_amount", "payment_amount", "patient_responsibility",
+            "payer_claim_control", "adjustment_codes",
+          },
+          ...
+        ],
+        "segments", "by_id",
+      }
+    """
+    segments = parse_x12(raw)
+    if not segments:
+        raise ValueError("Empty X12 content.")
+
+    by_id = segments_by_id(segments)
+    st = (by_id.get("ST") or [None])[0]
+    st01 = _el(st, 1)
+    if st01 and st01 != "835":
+        raise ValueError(f"Expected ST*835, got ST*{st01}.")
+    if not st01:
+        # Some pasted snippets omit ISA/GS/ST — require at least one CLP.
+        if not by_id.get("CLP"):
+            raise ValueError("Expected ST*835 or at least one CLP segment.")
+
+    isa = (by_id.get("ISA") or [None])[0]
+    gs = (by_id.get("GS") or [None])[0]
+    bpr = (by_id.get("BPR") or [None])[0]
+    trn = (by_id.get("TRN") or [None])[0]
+
+    payment_date = None
+    for dtm in by_id.get("DTM") or []:
+        # DTM*405 / DTM*472 commonly used; prefer 405 (production date) then any.
+        qualifier = str(_el(dtm, 1) or "")
+        parsed = _parse_ccyymmdd(_el(dtm, 2))
+        if parsed and qualifier in ("405", "472", "050"):
+            payment_date = parsed
+            break
+        if parsed and payment_date is None:
+            payment_date = parsed
+
+    claims = []
+    current = None
+    cas_bits: list[str] = []
+
+    def _flush():
+        nonlocal current, cas_bits
+        if current is None:
+            return
+        if cas_bits:
+            current["adjustment_codes"] = ";".join(cas_bits)[:500]
+        claims.append(current)
+        current = None
+        cas_bits = []
+
+    for seg in segments:
+        sid = seg.get("id")
+        if sid == "CLP":
+            _flush()
+            claim_number = str(_el(seg, 1) or "").strip()
+            clp02 = str(_el(seg, 2) or "").strip()
+            charge = _parse_decimal(_el(seg, 3))
+            payment = _parse_decimal(_el(seg, 4))
+            patient_resp = _parse_decimal(_el(seg, 5))
+            if not claim_number:
+                continue
+            current = {
+                "claim_number": claim_number,
+                "clp_status_code": clp02 or "",
+                "outcome": map_835_clp_outcome(clp02, payment),
+                "charge_amount": charge,
+                "payment_amount": payment,
+                "patient_responsibility": patient_resp,
+                "payer_claim_control": (_el(seg, 7) or None),
+                "adjustment_codes": None,
+            }
+            cas_bits = []
+        elif sid == "CAS" and current is not None:
+            # CAS*CO*45*10.00*1*...
+            group = _el(seg, 1)
+            reason = _el(seg, 2)
+            amt = _el(seg, 3)
+            if group or reason:
+                cas_bits.append(f"{group or ''}:{reason or ''}:{amt or ''}")
+
+    _flush()
+
+    if not claims:
+        raise ValueError("No CLP claim lines found in 835 content.")
+
+    message_parts = []
+    if _el(bpr, 1):
+        message_parts.append(f"BPR01={_el(bpr, 1)}")
+    if _el(trn, 2):
+        message_parts.append(f"TRN02={_el(trn, 2)}")
+    message_parts.append(f"CLP_COUNT={len(claims)}")
+
+    return {
+        "segments": segments,
+        "by_id": {k: v for k, v in by_id.items()},
+        "isa13": _el(isa, 13),
+        "gs06": _el(gs, 6),
+        "st02": _el(st, 2),
+        "trace_number": _el(trn, 2),
+        "payment_method": _el(bpr, 4),
+        "total_payment": _parse_decimal(_el(bpr, 2)),
+        "payment_date": payment_date,
+        "message": "; ".join(message_parts) or None,
+        "claims": claims,
+        "transaction_type": "835",
+    }

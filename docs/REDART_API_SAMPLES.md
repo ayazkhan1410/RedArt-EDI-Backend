@@ -175,6 +175,16 @@ curl -s "http://127.0.0.1:7000/api/v1/submission-batches/<batch_id>/status/" \
   -H "Authorization: Bearer $TOKEN"
 ```
 
+### Import 835 (paid / denied)
+
+```bash
+curl -s -X POST "http://127.0.0.1:7000/api/v1/edi-835-remittances/import/" \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d "{\"content\":\"ST*835*0001~CLP*TESTCLAIM0001*1*14.90*14.90*0*MC*X*11~\",\"apply_claim_status\":true}"
+```
+
+**CLP02 mapping (v1):** `1/2/3/19/20/21` + payment > 0 → `Claim.status=PAID`; `4` or $0 processed → `DENIED`; `22/23/25` → `UNDER_REVIEW` (won't overwrite existing PAID/DENIED). List: `GET /api/v1/edi-835-remittances/`.
+
 ### Import 999 (manual paste)
 
 ```bash

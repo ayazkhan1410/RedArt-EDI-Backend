@@ -11,6 +11,11 @@ from apps.edi.import_999_views import (
     EDI999ImportListAPIView,
     EDI999ImportPollAPIView,
 )
+from apps.edi.remittance_views import (
+    EDI835RemittanceDetailAPIView,
+    EDI835RemittanceImportAPIView,
+    EDI835RemittanceListAPIView,
+)
 from apps.edi.sftp_views import (
     SFTPCredentialsDetailAPIView,
     SFTPCredentialsListCreateAPIView,
@@ -101,6 +106,21 @@ urlpatterns = [
         "edi-acknowledgements/import-999/",
         EDIAcknowledgementImport999APIView.as_view(),
         name="edi-acknowledgement-import-999",
+    ),
+    path(
+        "edi-835-remittances/",
+        EDI835RemittanceListAPIView.as_view(),
+        name="edi-835-remittance-list",
+    ),
+    path(
+        "edi-835-remittances/import/",
+        EDI835RemittanceImportAPIView.as_view(),
+        name="edi-835-remittance-import",
+    ),
+    path(
+        "edi-835-remittances/<int:pk>/",
+        EDI835RemittanceDetailAPIView.as_view(),
+        name="edi-835-remittance-detail",
     ),
     path(
         "edi-acknowledgements/<int:pk>/",
