@@ -16,6 +16,8 @@ from rest_framework.exceptions import NotFound, ValidationError
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from apps.core.soft_delete import hard_delete_permission_error, parse_hard_flag
+
 from apps.core.pagination import StandardPagination
 from apps.patient.models import Patient
 from apps.patient.serializers import (
@@ -271,11 +273,10 @@ class PatientDetailAPIView(APIView):
     def delete(self, request, pk):
         try:
             patient = get_object_or_404(Patient, pk=pk)
-            hard_delete = request.query_params.get("hard", "").lower() in (
-                "1",
-                "true",
-                "yes",
-            )
+            hard_delete = parse_hard_flag(request)
+            denied = hard_delete_permission_error(request, hard_delete)
+            if denied is not None:
+                return denied
 
             if hard_delete:
                 patient_id = patient.id

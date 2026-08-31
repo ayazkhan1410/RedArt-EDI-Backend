@@ -6,7 +6,7 @@ from decimal import Decimal
 from django.test import TestCase
 from django.urls import reverse
 from rest_framework import status
-from rest_framework.test import APITestCase
+from apps.core.testing import AuthAPITestCase
 
 from apps.claim.choices import ClaimStatus
 from apps.claim.models import Claim
@@ -131,7 +131,7 @@ class Import835ServiceTests(EDIFixturesMixin, TestCase):
         self.assertEqual(self.claim.status, ClaimStatus.PAID)
 
 
-class Import835APITests(EDIFixturesMixin, APITestCase):
+class Import835APITests(EDIFixturesMixin, AuthAPITestCase):
     def setUp(self):
         super().setUp()
         self.claim.status = ClaimStatus.EDI_ACCEPTED

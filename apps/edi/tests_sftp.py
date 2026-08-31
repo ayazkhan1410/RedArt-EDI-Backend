@@ -1,13 +1,14 @@
 from django.urls import reverse
 from rest_framework import status
-from rest_framework.test import APITestCase
+from apps.core.testing import AuthAPITestCase
 
 from apps.edi.models import SFTPCredentials, SFTPDirectory
 from apps.trading_partner.models import TradingPartner
 
 
-class SFTPAPITests(APITestCase):
+class SFTPAPITests(AuthAPITestCase):
     def setUp(self):
+        super().setUp()
         self.partner = TradingPartner.objects.create(
             name="Colorado Medicaid",
             sender_id="TP-SFTP",
@@ -42,9 +43,11 @@ class SFTPAPITests(APITestCase):
         self.assertNotIn("password", body)
         self.assertTrue(body["has_password"])
         self.assertFalse(body["has_private_key"])
-        self.assertEqual(
-            SFTPCredentials.objects.get(pk=cred_id).password, "super-secret"
-        )
+        stored = SFTPCredentials.objects.get(pk=cred_id).password
+        self.assertTrue(str(stored).startswith("fernet:"))
+        from apps.core.crypto_secrets import decrypt_secret
+
+        self.assertEqual(decrypt_secret(stored), "super-secret")
 
     def test_password_required_for_password_auth(self):
         response = self.client.post(

@@ -469,11 +469,15 @@ def add_claim_to_batch(*, batch_id, claim_id, st02=None):
 
     assert_claim_ready_for_batch(claim)
 
-    if BatchClaim.objects.filter(batch_id=batch.id, claim_id=claim.id).exists():
+    if BatchClaim.objects.filter(
+        batch_id=batch.id, claim_id=claim.id, is_active=True
+    ).exists():
         raise ValueError("Claim is already in this batch.")
 
     st02 = (st02 or "").strip() or next_st02_for_batch(batch)
-    if BatchClaim.objects.filter(batch_id=batch.id, st02=st02).exists():
+    if BatchClaim.objects.filter(
+        batch_id=batch.id, st02=st02, is_active=True
+    ).exists():
         raise ValueError(f"ST02 {st02} is already used in this batch.")
 
     row = BatchClaim.objects.create(
@@ -505,7 +509,7 @@ def create_claim_from_trip(
     if trip is None:
         raise ValueError("Trip not found or inactive.")
 
-    if Claim.objects.filter(trip_id=trip.id).exists():
+    if Claim.objects.filter(trip_id=trip.id, is_active=True).exists():
         raise ValueError("A claim already exists for this trip.")
 
     claim = Claim(

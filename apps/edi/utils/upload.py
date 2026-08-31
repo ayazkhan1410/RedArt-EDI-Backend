@@ -266,7 +266,7 @@ def run_edi_file_upload(*, edi_file_id, attempt, task_id=None, credentials_id=No
             sftp_log,
             status=TransferLogStatus.FAILED,
             message=str(exc)[:500],
-            detail=traceback.format_exc(),
+            detail=str(exc)[:2000],
             task_id=task_id,
         )
         logger.exception("SFTP upload failed edi_file_id=%s", edi_file_id)
@@ -293,7 +293,7 @@ def run_edi_file_upload(*, edi_file_id, attempt, task_id=None, credentials_id=No
             s3_log,
             status=TransferLogStatus.FAILED,
             message=str(exc)[:500],
-            detail=traceback.format_exc(),
+            detail=str(exc)[:2000],
             task_id=task_id,
         )
         logger.exception("S3 upload failed edi_file_id=%s", edi_file_id)

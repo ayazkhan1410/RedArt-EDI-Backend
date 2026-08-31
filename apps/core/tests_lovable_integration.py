@@ -3,7 +3,7 @@
 from django.test import SimpleTestCase, override_settings
 from django.urls import reverse
 from rest_framework import status
-from rest_framework.test import APITestCase
+from apps.core.testing import AuthAPITestCase
 
 from apps.core.lovable_helpers import (
     AUTH_TOKEN_PATH,
@@ -31,7 +31,7 @@ class LovableHelperTests(SimpleTestCase):
         self.assertTrue(catalog["happy_path"])
 
 
-class LovableCatalogAPITests(APITestCase):
+class LovableCatalogAPITests(AuthAPITestCase):
     def test_catalog_endpoint_public(self):
         response = self.client.get(reverse("integration-lovable-catalog"))
         self.assertEqual(response.status_code, status.HTTP_200_OK)

@@ -223,11 +223,23 @@ class SFTPCredentialsSerializer(serializers.ModelSerializer):
                     )
         return attrs
 
+    def create(self, validated_data):
+        from apps.core.crypto_secrets import encrypt_secret
+
+        for field in SECRET_WRITE_ONLY:
+            if field in validated_data and validated_data[field]:
+                validated_data[field] = encrypt_secret(validated_data[field])
+        return super().create(validated_data)
+
     def update(self, instance, validated_data):
+        from apps.core.crypto_secrets import encrypt_secret
+
         # Omit blank secret fields so PATCH without password does not clear it.
         for field in SECRET_WRITE_ONLY:
             if field in validated_data and validated_data[field] in (None, ""):
                 validated_data.pop(field)
+            elif field in validated_data and validated_data[field]:
+                validated_data[field] = encrypt_secret(validated_data[field])
         return super().update(instance, validated_data)
 
 

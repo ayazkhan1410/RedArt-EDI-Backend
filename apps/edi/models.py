@@ -5,6 +5,7 @@ from apps.edi.choices import (
     AcknowledgementStatus,
     AcknowledgementType,
     EDI999ImportStatus,
+    EDI835ImportStatus,
     EDIFileStatus,
     RemittanceClaimOutcome,
     SFTPAuthType,
@@ -413,6 +414,89 @@ class EDI999Import(BaseModel):
         return f"{self.filename} {self.status} #{self.pk}"
 
 
+class EDI835ImportQuerySet(models.QuerySet):
+    def with_relations(self):
+        return self.select_related(
+            "credentials",
+            "credentials__trading_partner",
+            "directory",
+            "remittance",
+        )
+
+
+class EDI835Import(BaseModel):
+    """
+    Track one inbound 835 file discovered on SFTP through import outcome.
+    Idempotent on credentials + remote_path (and file_hash when set).
+    """
+
+    credentials = models.ForeignKey(
+        "edi.SFTPCredentials",
+        on_delete=models.PROTECT,
+        related_name="edi_835_imports",
+        null=True,
+        blank=True,
+    )
+    directory = models.ForeignKey(
+        "edi.SFTPDirectory",
+        on_delete=models.SET_NULL,
+        related_name="edi_835_imports",
+        null=True,
+        blank=True,
+    )
+    remittance = models.ForeignKey(
+        "edi.EDI835Remittance",
+        on_delete=models.SET_NULL,
+        related_name="import_rows",
+        null=True,
+        blank=True,
+    )
+    filename = models.CharField(max_length=255)
+    remote_path = models.CharField(max_length=1024)
+    file_hash = models.CharField(max_length=128, null=True, blank=True)
+    status = models.CharField(
+        max_length=32,
+        choices=EDI835ImportStatus.choices,
+        default=EDI835ImportStatus.DISCOVERED,
+    )
+    attempt = models.PositiveIntegerField(default=0)
+    celery_task_id = models.CharField(max_length=255, null=True, blank=True)
+    message = models.CharField(max_length=500, null=True, blank=True)
+    detail = models.TextField(null=True, blank=True)
+    started_at = models.DateTimeField(null=True, blank=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+    is_active = models.BooleanField(default=True)
+
+    objects = EDI835ImportQuerySet.as_manager()
+
+    class Meta:
+        verbose_name = "EDI 835 Import"
+        verbose_name_plural = "EDI 835 Imports"
+        ordering = ("-id",)
+        constraints = [
+            models.UniqueConstraint(
+                fields=["credentials", "remote_path"],
+                condition=models.Q(
+                    credentials__isnull=False,
+                    remote_path__isnull=False,
+                    is_active=True,
+                ),
+                name="uniq_active_edi_835_import_remote_path",
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=["status", "is_active"],
+                name="edi_835_imp_status_active_idx",
+            ),
+            models.Index(fields=["file_hash"], name="edi_835_imp_hash_idx"),
+            models.Index(fields=["filename"], name="edi_835_imp_filename_idx"),
+        ]
+
+    def __str__(self):
+        return f"{self.filename} {self.status} #{self.pk}"
+
+
 class SFTPCredentialsQuerySet(models.QuerySet):
     def with_relations(self):
         return self.select_related("trading_partner")
@@ -552,6 +636,7 @@ class EDI835Remittance(BaseModel):
         max_length=64,
         null=True,
         blank=True,
+        unique=True,
         help_text="SHA-256 of normalized content for idempotent re-import.",
     )
     raw_file_ref = models.CharField(max_length=1024, null=True, blank=True)

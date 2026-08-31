@@ -1,11 +1,11 @@
 from django.urls import reverse
 from rest_framework import status
-from rest_framework.test import APITestCase
+from apps.core.testing import AuthAPITestCase
 
 from apps.patient.models import Patient
 
 
-class PatientAPITests(APITestCase):
+class PatientAPITests(AuthAPITestCase):
     def test_create_list_filter_by_county_and_duplicate_medicaid_id(self):
         list_url = reverse("patient-list-create")
         create = self.client.post(

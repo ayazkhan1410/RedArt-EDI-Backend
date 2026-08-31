@@ -4,7 +4,7 @@ from decimal import Decimal
 from django.test import TestCase
 from django.urls import reverse
 from rest_framework import status
-from rest_framework.test import APITestCase
+from apps.core.testing import AuthAPITestCase
 
 from apps.claim.choices import AttachmentStatus, ClaimStatus
 from apps.claim.models import BatchClaim, Claim
@@ -19,6 +19,7 @@ from apps.trading_partner.models import TradingPartner
 
 class ClaimFixturesMixin:
     def setUp(self):
+        super().setUp()
         LongDistanceRule.objects.update_or_create(
             county_type="STANDARD",
             defaults={
@@ -81,7 +82,7 @@ class ClaimServiceTests(ClaimFixturesMixin, TestCase):
             create_claim_from_trip(trip_id=self.trip.id, claim_number="C002")
 
 
-class ClaimAPITests(ClaimFixturesMixin, APITestCase):
+class ClaimAPITests(ClaimFixturesMixin, AuthAPITestCase):
     def test_create_from_trip_api(self):
         url = reverse("claim-from-trip")
         response = self.client.post(
@@ -166,7 +167,7 @@ class ClaimAPITests(ClaimFixturesMixin, APITestCase):
         self.assertFalse(claim.is_active)
 
 
-class ClaimDocumentAndBatchTests(ClaimFixturesMixin, APITestCase):
+class ClaimDocumentAndBatchTests(ClaimFixturesMixin, AuthAPITestCase):
     def setUp(self):
         super().setUp()
         self.claim, _ = create_claim_from_trip(

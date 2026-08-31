@@ -16,6 +16,8 @@ from rest_framework.exceptions import NotFound, ValidationError
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from apps.core.soft_delete import hard_delete_permission_error, parse_hard_flag
+
 from apps.core.pagination import StandardPagination
 from apps.core.utils.responses import error_response, success_response
 from apps.nemt_trip.models import NemtTrip
@@ -308,11 +310,10 @@ class NemtTripDetailAPIView(APIView):
     def delete(self, request, pk):
         try:
             trip = get_object_or_404(NemtTrip.objects.with_relations(), pk=pk)
-            hard_delete = request.query_params.get("hard", "").lower() in (
-                "1",
-                "true",
-                "yes",
-            )
+            hard_delete = parse_hard_flag(request)
+            denied = hard_delete_permission_error(request, hard_delete)
+            if denied is not None:
+                return denied
 
             if hard_delete:
                 trip_id = trip.id

@@ -1,7 +1,10 @@
 """Pre-flight checks before 837P generation."""
 
+from django.db.models import Prefetch
+
 from apps.claim.models import BatchClaim, SubmissionBatch
 from apps.claim.utils.service import assert_claim_ready_for_batch
+from apps.claim_service_line.models import ClaimServiceLine
 from apps.edi.utils.envelope import get_edi_envelope_config
 
 
@@ -32,7 +35,7 @@ def assert_batch_ready_for_837p_generation(batch):
     # Envelope constants must resolve (settings-backed).
     get_edi_envelope_config(batch.environment or partner.environment)
 
-    rows = (
+    rows = list(
         BatchClaim.objects.with_relations()
         .filter(batch_id=batch.id, is_active=True)
         .select_related(
@@ -41,8 +44,14 @@ def assert_batch_ready_for_837p_generation(batch):
             "claim__trip__patient",
             "claim__trip__provider",
         )
+        .prefetch_related(
+            Prefetch(
+                "claim__service_lines",
+                queryset=ClaimServiceLine.objects.filter(is_active=True).order_by("id"),
+            )
+        )
     )
-    if not rows.exists():
+    if not rows:
         raise ValueError("Batch has no active claims; cannot generate 837P.")
 
     for row in rows:
@@ -81,11 +90,36 @@ def assert_batch_ready_for_837p_generation(batch):
             raise ValueError(
                 f"Provider {provider.id} is missing NPI required for 837P."
             )
+        if not (provider.taxonomy_code or "").strip():
+            raise ValueError(
+                f"Provider {provider.id} is missing taxonomy_code "
+                "(required for Colorado 837P billing provider identity)."
+            )
 
-        if not claim.service_lines.filter(is_active=True).exists():
+        medicaid_id = (patient.medicaid_member_id or "").strip()
+        if not medicaid_id:
+            raise ValueError(
+                f"Patient {patient.id} is missing medicaid_member_id "
+                "(NM1*IL member ID required for 837P)."
+            )
+
+        service_lines = list(claim.service_lines.all())
+        if not service_lines:
             raise ValueError(
                 f"Claim {claim.claim_number or claim.id} has no active service lines."
             )
+
+        for line in service_lines:
+            if not (line.procedure_code or "").strip():
+                raise ValueError(
+                    f"Claim {claim.claim_number or claim.id} has a service line "
+                    "without procedure_code."
+                )
+            if line.charge is None:
+                raise ValueError(
+                    f"Claim {claim.claim_number or claim.id} has a service line "
+                    "without charge."
+                )
 
     return True
 

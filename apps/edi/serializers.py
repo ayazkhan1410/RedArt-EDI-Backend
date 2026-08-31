@@ -10,13 +10,18 @@ from apps.edi.choices import (
 from apps.edi.models import (
     EDI999Import,
     EDI835ClaimPayment,
+    EDI835Import,
     EDI835Remittance,
     EDIAcknowledgement,
     EDIControlNumber,
     EDIFile,
     EDIFileTransferLog,
 )
-from apps.edi.utils.validators import clean_control_digits, clean_optional_text
+from apps.edi.utils.validators import (
+    clean_control_digits,
+    clean_optional_text,
+    clean_path_or_blob_ref,
+)
 from apps.trading_partner.choices import Environment
 
 
@@ -159,7 +164,7 @@ class EDIFileSerializer(serializers.ModelSerializer):
         return clean_optional_text(value)
 
     def validate_path_or_blob_ref(self, value):
-        return clean_optional_text(value)
+        return clean_path_or_blob_ref(value)
 
     def validate_batch(self, value):
         if value is None:
@@ -246,7 +251,7 @@ class CreateEDIFileFromBatchSerializer(serializers.Serializer):
         return clean_optional_text(value)
 
     def validate_path_or_blob_ref(self, value):
-        return clean_optional_text(value)
+        return clean_path_or_blob_ref(value)
 
 
 class MarkEDIFileUploadedSerializer(serializers.Serializer):
@@ -256,7 +261,7 @@ class MarkEDIFileUploadedSerializer(serializers.Serializer):
     file_hash = serializers.CharField(required=False, allow_blank=True, allow_null=True)
 
     def validate_path_or_blob_ref(self, value):
-        return clean_optional_text(value)
+        return clean_path_or_blob_ref(value)
 
     def validate_file_hash(self, value):
         return clean_optional_text(value)
@@ -282,7 +287,6 @@ class EDIFileTransferLogSerializer(serializers.ModelSerializer):
             "attempt",
             "remote_path",
             "message",
-            "detail",
             "celery_task_id",
             "started_at",
             "finished_at",
@@ -477,9 +481,14 @@ class Import999AcknowledgementSerializer(serializers.Serializer):
     apply_claim_status = serializers.BooleanField(required=False, default=True)
 
     def validate_content(self, value):
+        from django.conf import settings
+
         text = (value or "").strip()
         if not text:
             raise serializers.ValidationError("content is required.")
+        max_chars = int(getattr(settings, "EDI_MAX_X12_CONTENT_CHARS", 2_000_000))
+        if len(text) > max_chars:
+            raise serializers.ValidationError("content exceeds maximum size.")
         return text
 
     def validate_raw_file_ref(self, value):
@@ -503,7 +512,6 @@ class EDI999ImportSerializer(serializers.ModelSerializer):
             "attempt",
             "celery_task_id",
             "message",
-            "detail",
             "started_at",
             "finished_at",
             "is_active",
@@ -645,3 +653,59 @@ class EDI835RemittanceListSerializer(serializers.ModelSerializer):
 
 class EDI835RemittanceIdSerializer(serializers.Serializer):
     id = serializers.IntegerField(read_only=True)
+
+
+class EDI835ImportSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = EDI835Import
+        fields = (
+            "id",
+            "credentials",
+            "directory",
+            "remittance",
+            "filename",
+            "remote_path",
+            "file_hash",
+            "status",
+            "attempt",
+            "celery_task_id",
+            "message",
+            "started_at",
+            "finished_at",
+            "is_active",
+            "created_at",
+            "updated_at",
+        )
+        read_only_fields = fields
+
+
+class EDI835ImportListSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = EDI835Import
+        fields = (
+            "id",
+            "credentials",
+            "directory",
+            "remittance",
+            "filename",
+            "remote_path",
+            "file_hash",
+            "status",
+            "attempt",
+            "celery_task_id",
+            "message",
+            "started_at",
+            "finished_at",
+            "is_active",
+            "created_at",
+        )
+        read_only_fields = fields
+
+
+class PollEDI835ImportsSerializer(serializers.Serializer):
+    credentials_id = serializers.IntegerField(required=False, allow_null=True)
+    async_mode = serializers.BooleanField(
+        required=False,
+        default=True,
+        help_text="If true, enqueue Celery poll_edi_835_imports; else run discover+queue inline.",
+    )

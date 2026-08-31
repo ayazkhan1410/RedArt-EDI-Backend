@@ -3,6 +3,7 @@ from django.contrib import admin
 from apps.edi.models import (
     EDI999Import,
     EDI835ClaimPayment,
+    EDI835Import,
     EDI835Remittance,
     EDIAcknowledgement,
     EDIControlNumber,
@@ -115,7 +116,15 @@ class SFTPCredentialsAdmin(admin.ModelAdmin):
     list_filter = ("environment", "auth_type", "is_active")
     search_fields = ("name", "host", "username")
     autocomplete_fields = ("trading_partner",)
-    readonly_fields = ("id", "created_at", "updated_at")
+    # Never echo ciphertext / PEM in admin change forms.
+    readonly_fields = (
+        "id",
+        "created_at",
+        "updated_at",
+        "password",
+        "private_key_pem",
+        "private_key_passphrase",
+    )
     fieldsets = (
         (
             None,
@@ -137,10 +146,14 @@ class SFTPCredentialsAdmin(admin.ModelAdmin):
             },
         ),
         (
-            "Secrets",
+            "Secrets (set via API; masked here)",
             {
                 "classes": ("collapse",),
                 "fields": ("password", "private_key_pem", "private_key_passphrase"),
+                "description": (
+                    "Secret values are write-only via the SFTP credentials API. "
+                    "Admin shows stored ciphertext only; rotate via API PATCH."
+                ),
             },
         ),
         ("Timestamps", {"fields": ("created_at", "updated_at")}),
@@ -194,6 +207,31 @@ class EDI999ImportAdmin(admin.ModelAdmin):
         "edi_file",
         "acknowledgement",
     )
+    readonly_fields = ("id", "created_at", "updated_at", "started_at", "finished_at")
+
+
+@admin.register(EDI835Import)
+class EDI835ImportAdmin(admin.ModelAdmin):
+    list_display = (
+        "id",
+        "filename",
+        "status",
+        "credentials",
+        "remittance",
+        "attempt",
+        "celery_task_id",
+        "is_active",
+        "created_at",
+    )
+    list_filter = ("status", "is_active")
+    search_fields = (
+        "filename",
+        "remote_path",
+        "file_hash",
+        "celery_task_id",
+        "message",
+    )
+    autocomplete_fields = ("credentials", "directory", "remittance")
     readonly_fields = ("id", "created_at", "updated_at", "started_at", "finished_at")
 
 

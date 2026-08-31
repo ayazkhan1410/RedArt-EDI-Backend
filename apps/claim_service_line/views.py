@@ -16,6 +16,8 @@ from rest_framework.exceptions import NotFound, ValidationError
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from apps.core.soft_delete import hard_delete_permission_error, parse_hard_flag
+
 from apps.claim.utils.validators import parse_optional_int
 from apps.claim_service_line.models import ClaimServiceLine
 from apps.claim_service_line.serializers import (
@@ -263,11 +265,10 @@ class ClaimServiceLineDetailAPIView(APIView):
     def delete(self, request, pk):
         try:
             line = get_object_or_404(ClaimServiceLine, pk=pk)
-            hard_delete = request.query_params.get("hard", "").lower() in (
-                "1",
-                "true",
-                "yes",
-            )
+            hard_delete = parse_hard_flag(request)
+            denied = hard_delete_permission_error(request, hard_delete)
+            if denied is not None:
+                return denied
             if hard_delete:
                 line_id = line.id
                 line.delete()

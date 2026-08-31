@@ -188,6 +188,14 @@ curl -s -X POST "http://127.0.0.1:7000/api/v1/edi-835-remittances/import/" \
 
 **CLP02 mapping (v1):** `1/2/3/19/20/21` + payment > 0 → `Claim.status=PAID`; `4` or $0 processed → `DENIED`; `22/23/25` → `UNDER_REVIEW` (won't overwrite existing PAID/DENIED). List: `GET /api/v1/edi-835-remittances/`.
 
+Or poll SFTP for 835:
+
+```bash
+curl -s -X POST "http://127.0.0.1:7000/api/v1/edi-835-imports/poll/" \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d "{\"credentials_id\":<sftp_credentials_id>,\"async_mode\":true}"
+```
+
 ### Import 999 (manual paste)
 
 ```bash

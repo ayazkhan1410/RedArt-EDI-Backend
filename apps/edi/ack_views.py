@@ -16,6 +16,8 @@ from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from apps.core.soft_delete import hard_delete_permission_error, parse_hard_flag
+
 from apps.core.pagination import StandardPagination
 from apps.core.utils.responses import error_response, success_response
 from apps.edi.models import EDIAcknowledgement
@@ -309,11 +311,10 @@ class EDIAcknowledgementDetailAPIView(APIView):
             row = get_object_or_404(
                 EDIAcknowledgement.objects.with_relations(), pk=pk
             )
-            hard_delete = request.query_params.get("hard", "").lower() in (
-                "1",
-                "true",
-                "yes",
-            )
+            hard_delete = parse_hard_flag(request)
+            denied = hard_delete_permission_error(request, hard_delete)
+            if denied is not None:
+                return denied
             if hard_delete:
                 row_id = row.id
                 row.delete()
@@ -434,7 +435,6 @@ class EDIAcknowledgementImport999APIView(APIView):
                         "ak1": parsed.get("ak1"),
                         "ak2": parsed.get("ak2"),
                         "message": parsed.get("message"),
-                        "segments": parsed.get("segments"),
                     },
                 },
                 status_code=status.HTTP_201_CREATED,

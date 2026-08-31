@@ -7,7 +7,7 @@ from django.core.management.base import CommandError
 from django.test import TestCase
 from django.urls import reverse
 from rest_framework import status
-from rest_framework.test import APITestCase
+from apps.core.testing import AuthAPITestCase
 
 from apps.core.auth_constants import API_SERVICE_GROUP_NAME
 
@@ -56,8 +56,11 @@ class CreateApiServiceUserCommandTests(TestCase):
         self.assertTrue(user.check_password("RotatedPass123!@#x"))
 
 
-class ServiceTokenAuthTests(APITestCase):
+class ServiceTokenAuthTests(AuthAPITestCase):
+    authenticate_by_default = False
+
     def setUp(self):
+        super().setUp()
         self.password = "ServicePass123!@#xx"
         self.service = User.objects.create_user(
             username="svc_redart",

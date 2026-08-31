@@ -1,11 +1,11 @@
 from django.urls import reverse
 from rest_framework import status
-from rest_framework.test import APITestCase
+from apps.core.testing import AuthAPITestCase
 
 from apps.provider_billing_profile.models import ProviderBillingProfile
 
 
-class ProviderBillingProfileAPITests(APITestCase):
+class ProviderBillingProfileAPITests(AuthAPITestCase):
     def test_create_get_patch_and_soft_delete(self):
         list_url = reverse("provider-billing-profile-list-create")
         create = self.client.post(

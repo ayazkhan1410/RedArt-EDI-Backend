@@ -53,6 +53,10 @@ class ClaimSerializer(serializers.ModelSerializer):
             "trip_label",
             "patient_id",
             "provider_id",
+            "status",
+            "attachment_required",
+            "attachment_status",
+            "is_active",
             "created_at",
             "updated_at",
         )

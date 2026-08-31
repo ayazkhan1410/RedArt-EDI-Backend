@@ -1,12 +1,13 @@
 from django.urls import reverse
 from rest_framework import status
-from rest_framework.test import APITestCase
+from apps.core.testing import AuthAPITestCase
 
 from apps.long_distance_rule.models import LongDistanceRule
 
 
-class LongDistanceRuleCRUDTests(APITestCase):
+class LongDistanceRuleCRUDTests(AuthAPITestCase):
     def setUp(self):
+        super().setUp()
         self.standard, _ = LongDistanceRule.objects.update_or_create(
             county_type="STANDARD",
             defaults={

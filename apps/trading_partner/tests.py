@@ -1,11 +1,11 @@
 from django.urls import reverse
 from rest_framework import status
-from rest_framework.test import APITestCase
+from apps.core.testing import AuthAPITestCase
 
 from apps.trading_partner.models import TradingPartner
 
 
-class TradingPartnerAPITests(APITestCase):
+class TradingPartnerAPITests(AuthAPITestCase):
     def test_create_list_get_and_soft_delete(self):
         list_url = reverse("trading-partner-list-create")
         create = self.client.post(

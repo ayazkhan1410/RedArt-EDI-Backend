@@ -164,7 +164,8 @@ SIMPLE_JWT = {
     "REFRESH_TOKEN_LIFETIME": timedelta(
         days=env.int("JWT_REFRESH_DAYS", default=7)
     ),
-    "ROTATE_REFRESH_TOKENS": False,
+    "ROTATE_REFRESH_TOKENS": True,
+    "BLACKLIST_AFTER_ROTATION": False,
     "UPDATE_LAST_LOGIN": True,
     "AUTH_HEADER_TYPES": ("Bearer",),
     "AUTH_HEADER_NAME": "HTTP_AUTHORIZATION",
@@ -175,6 +176,10 @@ SIMPLE_JWT = {
 # Optional bootstrap values for create_api_service_user / entrypoint.
 EDI_API_SERVICE_USERNAME = env("EDI_API_SERVICE_USERNAME", default="")
 EDI_API_SERVICE_EMAIL = env("EDI_API_SERVICE_EMAIL", default="")
+
+# Comma-separated override for HCPF designated rural counties (125-mile threshold).
+# Empty → use seeded list in apps.long_distance_rule.utils.counties.
+EDI_RURAL_COUNTIES = env("EDI_RURAL_COUNTIES", default="")
 
 # Public TEST/PROD API base URL shared with RedArt / Lovable (no trailing slash).
 # Example: https://redart-edi-test.onrender.com
@@ -324,7 +329,12 @@ AWS_S3_REGION_NAME = env("AWS_S3_REGION_NAME", default="us-east-1")
 
 # Billing provider EIN/TIN for 2010AA REF*EI (required when NM1 uses NPI/XX).
 # Replace with real TIN in production; optional provider.tax_id field later.
-EDI_DEFAULT_BILLING_TAX_ID = env("EDI_DEFAULT_BILLING_TAX_ID", default="123456789")
+EDI_DEFAULT_BILLING_TAX_ID = env("EDI_DEFAULT_BILLING_TAX_ID", default="")
+EDI_MAX_SFTP_DOWNLOAD_BYTES = env.int("EDI_MAX_SFTP_DOWNLOAD_BYTES", default=5_000_000)
+EDI_MAX_X12_CONTENT_CHARS = env.int("EDI_MAX_X12_CONTENT_CHARS", default=2_000_000)
+EDI_SFTP_REQUIRE_HOST_FINGERPRINT = env.bool(
+    "EDI_SFTP_REQUIRE_HOST_FINGERPRINT", default=False
+)
 
 # Optional seed for real/test SFTP (never commit secrets — put in .env)
 SFTP_SEED_NAME = env("SFTP_SEED_NAME", default="SEED-SFTP-CLOUD")
