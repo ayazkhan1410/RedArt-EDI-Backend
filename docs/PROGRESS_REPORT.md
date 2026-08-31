@@ -41,14 +41,14 @@ Enforce auth in Docker/local: `API_REQUIRE_AUTH=true`
 
 | # | Item | Owner / note |
 |---|------|----------------|
-| 1 | Deployed TEST API URL + service user credential (secure delivery) | Ops / cloud |
+| 1 | Deployed TEST API URL + secure credential delivery | **Ready to deploy** — `render.yaml` + `docs/LOVABLE_EDI_DEPLOY.md` + `deliver_redart_handoff` (needs Render/Railway account) |
 | 2 | Confirm HCPF picked up test 837P + import returned 999 | Ops / wait on HCPF |
 | 3 | Stronger production 837P TR3 coverage | EDI eng (demo OK now) |
 | 4 | Live HCPF attachment channel send | Later (tracking exists) |
-| 5 | Production hardening (`API_REQUIRE_AUTH`, HTTPS, secrets) | Deploy |
+| 5 | Production hardening finish + HTTPS on host | Deploy |
 | 6 | 835 SFTP auto-poll (import-paste done) | Later |
 
-**Roughly 5–6 remaining items** — cloud TEST URL still ops. 835 paste-import paid/denied is ready.
+**Note:** Lovable deploys the **UI**, not this Django EDI service. Use Render Blueprint for the API URL, then hand off credentials securely.
 
 ---
 

@@ -1,8 +1,11 @@
 # RedArt ↔ EDI Backend — API samples (TEST)
 
 Base URL (local Docker): `http://127.0.0.1:7000`  
-Swagger: `http://127.0.0.1:7000/api/docs/`  
+After cloud deploy: set `EDI_PUBLIC_BASE_URL` (see `docs/LOVABLE_EDI_DEPLOY.md`).  
+Swagger: `{BASE}/api/docs/`  
 Auth: JWT Bearer from a **service user** (not the browser).
+
+**Lovable** hosts the RedArt **UI only**. This EDI API deploys on Render/Railway/VPS (`render.yaml`). Flow: `Lovable → RedArt backend → EDI API`.
 
 Create service user (one-time):
 

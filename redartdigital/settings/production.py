@@ -23,6 +23,17 @@ X_FRAME_OPTIONS = "DENY"
 
 CORS_ALLOW_ALL_ORIGINS = False
 CORS_ALLOWED_ORIGINS = env.list("CORS_ALLOWED_ORIGINS", default=[])
+CORS_ALLOWED_ORIGIN_REGEXES = env.list("CORS_ALLOWED_ORIGIN_REGEXES", default=[])
+if env.bool("EDI_ALLOW_LOVABLE_ORIGINS", default=False):
+    _lovable_regexes = [
+        r"^https://[\w.-]+\.lovable\.app$",
+        r"^https://[\w.-]+\.lovableproject\.com$",
+    ]
+    CORS_ALLOWED_ORIGIN_REGEXES = list(CORS_ALLOWED_ORIGIN_REGEXES) + [
+        r for r in _lovable_regexes if r not in CORS_ALLOWED_ORIGIN_REGEXES
+    ]
+
+CSRF_TRUSTED_ORIGINS = env.list("CSRF_TRUSTED_ORIGINS", default=[])
 
 # Production always requires authentication (JWT Bearer or session).
 REST_FRAMEWORK = {
