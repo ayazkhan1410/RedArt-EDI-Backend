@@ -122,11 +122,10 @@ Do **not** re-decide `attachment_required` after 999 — set at rules stage and 
 ## Next to build
 
 1. Populate rural counties (or county table) so DESIGNATED_RURAL actually applies  
-2. AttachmentSubmission (separate channel tracking; ClaimDocument already exists)  
-3. EDIAcknowledgement (999 parsing / store)  
-4. **837P payload generator + generate API** (readiness + envelope config done; X12 body not yet)  
-5. SFTP client using SFTPCredentials/SFTPDirectory  
-6. Service auth for RedArt → EDI  
+2. Live attachment channel + stronger TR3 / 835 as needed  
+3. Confirm HCPF 999 pickup on FromEdifecs after real submissions  
+
+**Done for RedArt handoff:** JWT (`POST /api/v1/auth/token/`), service user (`create_api_service_user`), samples in `docs/REDART_API_SAMPLES.md`, claim validate/status APIs.
 
 Patient demographics (gender/address) and `EDI_ENVELOPE` settings are in place.  
 Use `apps.edi.utils.readiness.assert_batch_ready_for_837p_generation` before generate.

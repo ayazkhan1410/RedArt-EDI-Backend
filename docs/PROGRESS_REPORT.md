@@ -20,14 +20,16 @@
 | Upload to HCPF SFTP + MinIO + transfer logs | Done |
 | 999 import (paste + SFTP poll) / apply (never sets PAID) | Done |
 | JWT auth: `POST /api/v1/auth/token/` (+ refresh/verify) | Done |
+| API service user (`create_api_service_user`, group `edi_api_service`) | Done |
+| Sample curl pack: `docs/REDART_API_SAMPLES.md` | Done |
 | Swagger: `/api/docs/` · versioned `/api/v1/` | Done |
 | HCPF TP enrollment + real MFT key SFTP wired (TEST) | Done |
 
 ### What Wahab needs from this service
 1. **API URL** (TEST/deployed host)  
-2. **Auth** — create service user → `POST /api/v1/auth/token/` → `Authorization: Bearer <access>`  
+2. **Auth** — service user credentials (secure channel) → `POST /api/v1/auth/token/` → `Authorization: Bearer <access>`  
 3. **Swagger** — `/api/docs/`  
-4. **Sample payloads** — Swagger examples + seed data (`seed_demo_data --flush-all`)
+4. **Sample payloads** — `docs/REDART_API_SAMPLES.md` + seed (`seed_demo_data --flush-all`)
 
 Local Docker: `http://127.0.0.1:7000`  
 Enforce auth in Docker/local: `API_REQUIRE_AUTH=true`
@@ -39,14 +41,13 @@ Enforce auth in Docker/local: `API_REQUIRE_AUTH=true`
 | # | Item | Owner / note |
 |---|------|----------------|
 | 1 | Deployed TEST API URL + service user credential (secure delivery) | Ops / EDI eng |
-| 2 | Sample request/response pack (one-pager for RedArt) | EDI eng |
-| 3 | Confirm HCPF picked up test 837P + import returned 999 | Ops / wait on HCPF |
-| 4 | Stronger production 837P TR3 coverage | EDI eng (demo OK now) |
-| 5 | 835 paid/denied processing | Later (handoff PDF) |
-| 6 | Live HCPF attachment channel send | Later (tracking exists) |
-| 7 | Production hardening (`API_REQUIRE_AUTH`, HTTPS, secrets) | Deploy |
+| 2 | Confirm HCPF picked up test 837P + import returned 999 | Ops / wait on HCPF |
+| 3 | Stronger production 837P TR3 coverage | EDI eng (demo OK now) |
+| 4 | 835 paid/denied processing | Later (handoff PDF) |
+| 5 | Live HCPF attachment channel send | Later (tracking exists) |
+| 6 | Production hardening (`API_REQUIRE_AUTH`, HTTPS, secrets) | Deploy |
 
-**Roughly 7 remaining items** — **3 are required before RedArt connects** (#1–#2, plus #7 for any shared TEST). #3–#6 can continue in parallel.
+**Roughly 6 remaining items** — TEST URL + secure credential delivery still needed for RedArt (#1). Samples + local service user are ready.
 
 ---
 

@@ -4,6 +4,7 @@ from datetime import date
 from decimal import Decimal
 
 from django.contrib.auth import get_user_model
+from django.contrib.auth.models import Group
 from django.test import TestCase, override_settings
 from django.urls import reverse
 from rest_framework import status
@@ -13,6 +14,7 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from apps.claim.choices import ClaimStatus, DocumentStatus, DocumentType
 from apps.claim.models import ClaimDocument, SubmissionBatch
 from apps.claim.utils.service import create_claim_from_trip, validate_claim_for_edi
+from apps.core.auth_constants import API_SERVICE_GROUP_NAME
 from apps.long_distance_rule.models import LongDistanceRule
 from apps.nemt_trip.models import NemtTrip
 from apps.patient.models import Patient
@@ -30,6 +32,8 @@ class AuthJWTAPITests(APITestCase):
             password="test-password-123",
             email="service@redart.example",
         )
+        group, _ = Group.objects.get_or_create(name=API_SERVICE_GROUP_NAME)
+        self.user.groups.add(group)
 
     def test_obtain_refresh_and_verify_token(self):
         obtain = self.client.post(

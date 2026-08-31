@@ -147,6 +147,20 @@ wait_for_redis
 # Django migrate + beat schedules (web only)
 # migrate is safe/idempotent: "No migrations to apply" when already up to date
 # ========
+ensure_api_service_user() {
+  if [[ -z "${EDI_API_SERVICE_USERNAME:-}" || -z "${EDI_API_SERVICE_PASSWORD:-}" ]]; then
+    echo "[entrypoint] EDI API service user skipped (set EDI_API_SERVICE_USERNAME/PASSWORD)."
+    return 0
+  fi
+  echo "[entrypoint] Ensuring EDI API service user exists ..."
+  python manage.py create_api_service_user \
+    --username "${EDI_API_SERVICE_USERNAME}" \
+    --email "${EDI_API_SERVICE_EMAIL:-${EDI_API_SERVICE_USERNAME}@edi.local}" \
+    --password-from-env \
+    --rotate-password \
+    || echo "[entrypoint] WARNING: create_api_service_user failed"
+}
+
 ensure_superuser() {
   if [[ -z "${DJANGO_SUPERUSER_USERNAME:-}" ]]; then
     return 0
@@ -195,6 +209,7 @@ if [[ "${ROLE}" == "web" ]]; then
   fi
   setup_celery_beat_schedules
   ensure_superuser
+  ensure_api_service_user
   # collectstatic only needed for Gunicorn + WhiteNoise
   if [[ "${USE_GUNICORN:-false}" == "true" ]]; then
     echo "[entrypoint] Collecting static files ..."
