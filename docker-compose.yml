@@ -173,7 +173,8 @@ services:
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/1
       FLOWER_PORT: "5555"
-      FLOWER_BASIC_AUTH: "${FLOWER_BASIC_AUTH:-admin:changeme}"
+      # Required: user:password (no weak default). Example: FLOWER_BASIC_AUTH=admin:secret
+      FLOWER_BASIC_AUTH: "${FLOWER_BASIC_AUTH:-}"
     ports:
       # Host 7003 → container 5555
       - "${FLOWER_HOST_PORT:-7003}:5555"

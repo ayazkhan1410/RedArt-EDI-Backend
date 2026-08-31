@@ -4,7 +4,6 @@ import traceback
 from django.db import IntegrityError
 from django.db.models import Q
 from django.http import Http404
-from django.shortcuts import get_object_or_404
 from drf_spectacular.utils import (
     OpenApiExample,
     OpenApiParameter,
@@ -16,7 +15,13 @@ from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.core.soft_delete import hard_delete_permission_error, parse_hard_flag
+from apps.core.soft_delete import (
+    client_error_message,
+    get_active_object_or_404,
+    get_api_object_or_404,
+    hard_delete_permission_error,
+    parse_hard_flag,
+)
 
 from apps.claim.utils.validators import parse_optional_int
 from apps.core.pagination import StandardPagination
@@ -200,7 +205,7 @@ class EDIControlNumberAllocateAPIView(APIView):
                 status_code=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
             )
         except ValueError as exc:
-            return error_response(str(exc), status_code=status.HTTP_400_BAD_REQUEST)
+            return error_response(client_error_message(exc), status_code=status.HTTP_400_BAD_REQUEST)
         except IntegrityError:
             return error_response(
                 "Unable to allocate control numbers due to a conflict.",
@@ -242,7 +247,7 @@ class EDIControlNumberAllocateAPIView(APIView):
 class EDIControlNumberDetailAPIView(APIView):
     def get(self, request, pk):
         try:
-            row = get_object_or_404(
+            row = get_active_object_or_404(
                 EDIControlNumber.objects.with_relations(), pk=pk
             )
             return success_response(
@@ -273,7 +278,7 @@ class EDIControlNumberDetailAPIView(APIView):
 
     def _update(self, request, pk, partial):
         try:
-            row = get_object_or_404(
+            row = get_active_object_or_404(
                 EDIControlNumber.objects.with_relations(), pk=pk
             )
             serializer = EDIControlNumberSerializer(
@@ -309,13 +314,14 @@ class EDIControlNumberDetailAPIView(APIView):
 
     def delete(self, request, pk):
         try:
-            row = get_object_or_404(
-                EDIControlNumber.objects.with_relations(), pk=pk
-            )
             hard_delete = parse_hard_flag(request)
             denied = hard_delete_permission_error(request, hard_delete)
             if denied is not None:
                 return denied
+            row = get_api_object_or_404(
+                EDIControlNumber.objects.with_relations(), pk=pk,
+                hard=hard_delete,
+            )
             if hard_delete:
                 row_id = row.id
                 row.delete()
@@ -518,7 +524,7 @@ class EDIFileFromBatchAPIView(APIView):
                 status_code=status.HTTP_201_CREATED,
             )
         except ValueError as exc:
-            return error_response(str(exc), status_code=status.HTTP_400_BAD_REQUEST)
+            return error_response(client_error_message(exc), status_code=status.HTTP_400_BAD_REQUEST)
         except IntegrityError:
             return error_response(
                 "Unable to create EDI file due to a conflict.",
@@ -560,7 +566,7 @@ class EDIFileFromBatchAPIView(APIView):
 class EDIFileDetailAPIView(APIView):
     def get(self, request, pk):
         try:
-            row = get_object_or_404(EDIFile.objects.with_relations(), pk=pk)
+            row = get_active_object_or_404(EDIFile.objects.with_relations(), pk=pk)
             return success_response(
                 "EDI file retrieved successfully.",
                 data=EDIFileSerializer(row).data,
@@ -587,7 +593,7 @@ class EDIFileDetailAPIView(APIView):
 
     def _update(self, request, pk, partial):
         try:
-            row = get_object_or_404(EDIFile.objects.with_relations(), pk=pk)
+            row = get_active_object_or_404(EDIFile.objects.with_relations(), pk=pk)
             serializer = EDIFileSerializer(
                 row, data=request.data, partial=partial
             )
@@ -619,11 +625,11 @@ class EDIFileDetailAPIView(APIView):
 
     def delete(self, request, pk):
         try:
-            row = get_object_or_404(EDIFile.objects.with_relations(), pk=pk)
             hard_delete = parse_hard_flag(request)
             denied = hard_delete_permission_error(request, hard_delete)
             if denied is not None:
                 return denied
+            row = get_api_object_or_404(EDIFile.objects.with_relations(), pk=pk, hard=hard_delete)
             if hard_delete:
                 row_id = row.id
                 row.delete()
@@ -683,7 +689,7 @@ class EDIFileMarkUploadedAPIView(APIView):
                 },
             )
         except ValueError as exc:
-            return error_response(str(exc), status_code=status.HTTP_400_BAD_REQUEST)
+            return error_response(client_error_message(exc), status_code=status.HTTP_400_BAD_REQUEST)
         except Exception:
             logger.error(
                 "Mark EDI file uploaded id=%s failed:\n%s",
@@ -733,7 +739,7 @@ class EDIFileGenerate837PAPIView(APIView):
                 status_code=status.HTTP_201_CREATED,
             )
         except ValueError as exc:
-            return error_response(str(exc), status_code=status.HTTP_400_BAD_REQUEST)
+            return error_response(client_error_message(exc), status_code=status.HTTP_400_BAD_REQUEST)
         except IntegrityError:
             return error_response(
                 "Unable to generate 837P due to a conflict.",
@@ -791,7 +797,7 @@ class EDIFileQueueUploadAPIView(APIView):
                 status_code=status.HTTP_202_ACCEPTED,
             )
         except ValueError as exc:
-            return error_response(str(exc), status_code=status.HTTP_400_BAD_REQUEST)
+            return error_response(client_error_message(exc), status_code=status.HTTP_400_BAD_REQUEST)
         except Exception:
             logger.error(
                 "Queue EDI upload id=%s failed:\n%s", pk, traceback.format_exc()
@@ -869,7 +875,7 @@ class EDIFileTransferLogDetailAPIView(APIView):
     )
     def get(self, request, pk):
         try:
-            row = get_object_or_404(
+            row = get_active_object_or_404(
                 EDIFileTransferLog.objects.with_relations(),
                 pk=pk,
             )

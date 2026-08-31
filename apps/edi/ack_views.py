@@ -4,7 +4,6 @@ import traceback
 from django.db import IntegrityError
 from django.db.models import Q
 from django.http import Http404
-from django.shortcuts import get_object_or_404
 from drf_spectacular.utils import (
     OpenApiExample,
     OpenApiParameter,
@@ -16,7 +15,13 @@ from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.core.soft_delete import hard_delete_permission_error, parse_hard_flag
+from apps.core.soft_delete import (
+    client_error_message,
+    get_active_object_or_404,
+    get_api_object_or_404,
+    hard_delete_permission_error,
+    parse_hard_flag,
+)
 
 from apps.core.pagination import StandardPagination
 from apps.core.utils.responses import error_response, success_response
@@ -240,7 +245,7 @@ class EDIAcknowledgementListCreateAPIView(APIView):
 class EDIAcknowledgementDetailAPIView(APIView):
     def get(self, request, pk):
         try:
-            row = get_object_or_404(
+            row = get_active_object_or_404(
                 EDIAcknowledgement.objects.with_relations(), pk=pk
             )
             return success_response(
@@ -271,7 +276,7 @@ class EDIAcknowledgementDetailAPIView(APIView):
 
     def _update(self, request, pk, partial):
         try:
-            row = get_object_or_404(
+            row = get_active_object_or_404(
                 EDIAcknowledgement.objects.with_relations(), pk=pk
             )
             serializer = EDIAcknowledgementSerializer(
@@ -308,13 +313,14 @@ class EDIAcknowledgementDetailAPIView(APIView):
 
     def delete(self, request, pk):
         try:
-            row = get_object_or_404(
-                EDIAcknowledgement.objects.with_relations(), pk=pk
-            )
             hard_delete = parse_hard_flag(request)
             denied = hard_delete_permission_error(request, hard_delete)
             if denied is not None:
                 return denied
+            row = get_api_object_or_404(
+                EDIAcknowledgement.objects.with_relations(), pk=pk,
+                hard=hard_delete,
+            )
             if hard_delete:
                 row_id = row.id
                 row.delete()
@@ -388,7 +394,7 @@ class EDIAcknowledgementApplyAPIView(APIView):
                 status_code=status.HTTP_201_CREATED,
             )
         except ValueError as exc:
-            return error_response(str(exc), status_code=status.HTTP_400_BAD_REQUEST)
+            return error_response(client_error_message(exc), status_code=status.HTTP_400_BAD_REQUEST)
         except Exception:
             logger.error("Apply EDI acknowledgement failed:\n%s", traceback.format_exc())
             return error_response(
@@ -440,7 +446,7 @@ class EDIAcknowledgementImport999APIView(APIView):
                 status_code=status.HTTP_201_CREATED,
             )
         except ValueError as exc:
-            return error_response(str(exc), status_code=status.HTTP_400_BAD_REQUEST)
+            return error_response(client_error_message(exc), status_code=status.HTTP_400_BAD_REQUEST)
         except Exception:
             logger.error(
                 "Import 999 acknowledgement failed:\n%s", traceback.format_exc()

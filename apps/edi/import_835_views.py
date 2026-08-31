@@ -7,10 +7,17 @@ import traceback
 
 from django.db.models import Q
 from django.http import Http404
-from django.shortcuts import get_object_or_404
 from drf_spectacular.utils import OpenApiExample, OpenApiParameter, extend_schema
 from rest_framework import status
 from rest_framework.views import APIView
+
+from apps.core.soft_delete import (
+    client_error_message,
+    get_active_object_or_404,
+    get_api_object_or_404,
+    hard_delete_permission_error,
+    parse_hard_flag,
+)
 
 from apps.claim.utils.validators import parse_optional_int
 from apps.core.pagination import StandardPagination
@@ -88,7 +95,7 @@ class EDI835ImportDetailAPIView(APIView):
     @extend_schema(tags=[TAG], responses={200: EDI835ImportSerializer})
     def get(self, request, pk):
         try:
-            row = get_object_or_404(EDI835Import.objects.with_relations(), pk=pk)
+            row = get_active_object_or_404(EDI835Import.objects.with_relations(), pk=pk)
             return success_response(
                 "Import 835 detail.",
                 data=EDI835ImportSerializer(row).data,
@@ -146,7 +153,7 @@ class EDI835ImportPollAPIView(APIView):
                 status_code=status.HTTP_202_ACCEPTED,
             )
         except ValueError as exc:
-            return error_response(str(exc), status_code=status.HTTP_400_BAD_REQUEST)
+            return error_response(client_error_message(exc), status_code=status.HTTP_400_BAD_REQUEST)
         except Exception:
             logger.error("Poll EDI835Import failed:\n%s", traceback.format_exc())
             return error_response(

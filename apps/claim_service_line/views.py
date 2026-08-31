@@ -4,7 +4,6 @@ import traceback
 from django.db import IntegrityError
 from django.db.models import Q
 from django.http import Http404
-from django.shortcuts import get_object_or_404
 from drf_spectacular.utils import (
     OpenApiExample,
     OpenApiParameter,
@@ -16,7 +15,13 @@ from rest_framework.exceptions import NotFound, ValidationError
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.core.soft_delete import hard_delete_permission_error, parse_hard_flag
+from apps.core.soft_delete import (
+    client_error_message,
+    get_active_object_or_404,
+    get_api_object_or_404,
+    hard_delete_permission_error,
+    parse_hard_flag,
+)
 
 from apps.claim.utils.validators import parse_optional_int
 from apps.claim_service_line.models import ClaimServiceLine
@@ -192,7 +197,7 @@ class ClaimServiceLineListCreateAPIView(APIView):
 class ClaimServiceLineDetailAPIView(APIView):
     def get(self, request, pk):
         try:
-            line = get_object_or_404(
+            line = get_active_object_or_404(
                 ClaimServiceLine.objects.with_relations(), pk=pk
             )
             return success_response(
@@ -221,7 +226,7 @@ class ClaimServiceLineDetailAPIView(APIView):
 
     def _update(self, request, pk, partial):
         try:
-            line = get_object_or_404(
+            line = get_active_object_or_404(
                 ClaimServiceLine.objects.with_relations(), pk=pk
             )
             serializer = ClaimServiceLineSerializer(
@@ -264,11 +269,11 @@ class ClaimServiceLineDetailAPIView(APIView):
 
     def delete(self, request, pk):
         try:
-            line = get_object_or_404(ClaimServiceLine, pk=pk)
             hard_delete = parse_hard_flag(request)
             denied = hard_delete_permission_error(request, hard_delete)
             if denied is not None:
                 return denied
+            line = get_api_object_or_404(ClaimServiceLine, pk=pk, hard=hard_delete)
             if hard_delete:
                 line_id = line.id
                 line.delete()

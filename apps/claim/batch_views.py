@@ -4,7 +4,6 @@ import traceback
 from django.db import IntegrityError
 from django.db.models import Q
 from django.http import Http404
-from django.shortcuts import get_object_or_404
 from drf_spectacular.utils import (
     OpenApiExample,
     OpenApiParameter,
@@ -16,7 +15,13 @@ from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.core.soft_delete import hard_delete_permission_error, parse_hard_flag
+from apps.core.soft_delete import (
+    client_error_message,
+    get_active_object_or_404,
+    get_api_object_or_404,
+    hard_delete_permission_error,
+    parse_hard_flag,
+)
 
 from apps.claim.models import BatchClaim, SubmissionBatch
 from apps.claim.serializers import (
@@ -191,7 +196,7 @@ class SubmissionBatchListCreateAPIView(APIView):
 class SubmissionBatchDetailAPIView(APIView):
     def get(self, request, pk):
         try:
-            batch = get_object_or_404(
+            batch = get_active_object_or_404(
                 SubmissionBatch.objects.with_relations(), pk=pk
             )
             return success_response(
@@ -222,7 +227,7 @@ class SubmissionBatchDetailAPIView(APIView):
 
     def _update(self, request, pk, partial):
         try:
-            batch = get_object_or_404(
+            batch = get_active_object_or_404(
                 SubmissionBatch.objects.with_relations(), pk=pk
             )
             serializer = SubmissionBatchSerializer(
@@ -259,13 +264,14 @@ class SubmissionBatchDetailAPIView(APIView):
 
     def delete(self, request, pk):
         try:
-            batch = get_object_or_404(
-                SubmissionBatch.objects.with_relations(), pk=pk
-            )
             hard_delete = parse_hard_flag(request)
             denied = hard_delete_permission_error(request, hard_delete)
             if denied is not None:
                 return denied
+            batch = get_api_object_or_404(
+                SubmissionBatch.objects.with_relations(), pk=pk,
+                hard=hard_delete,
+            )
             if hard_delete:
                 batch_id = batch.id
                 batch.delete()
@@ -335,7 +341,7 @@ class SubmissionBatchAddClaimAPIView(APIView):
                 status_code=status.HTTP_201_CREATED,
             )
         except ValueError as exc:
-            return error_response(str(exc), status_code=status.HTTP_400_BAD_REQUEST)
+            return error_response(client_error_message(exc), status_code=status.HTTP_400_BAD_REQUEST)
         except IntegrityError:
             return error_response(
                 "Unable to add claim to batch due to a conflict.",
@@ -440,7 +446,7 @@ class BatchClaimListCreateAPIView(APIView):
                 status_code=status.HTTP_201_CREATED,
             )
         except ValueError as exc:
-            return error_response(str(exc), status_code=status.HTTP_400_BAD_REQUEST)
+            return error_response(client_error_message(exc), status_code=status.HTTP_400_BAD_REQUEST)
         except IntegrityError:
             return error_response(
                 "Unable to create batch claim due to a conflict.",
@@ -472,7 +478,7 @@ class BatchClaimListCreateAPIView(APIView):
 class BatchClaimDetailAPIView(APIView):
     def get(self, request, pk):
         try:
-            row = get_object_or_404(BatchClaim.objects.with_relations(), pk=pk)
+            row = get_active_object_or_404(BatchClaim.objects.with_relations(), pk=pk)
             return success_response(
                 "Batch claim retrieved successfully.",
                 data=BatchClaimSerializer(row).data,
@@ -493,12 +499,12 @@ class BatchClaimDetailAPIView(APIView):
 
     def delete(self, request, pk):
         try:
-            row = get_object_or_404(BatchClaim.objects.with_relations(), pk=pk)
-            batch = row.batch
             hard_delete = parse_hard_flag(request)
             denied = hard_delete_permission_error(request, hard_delete)
             if denied is not None:
                 return denied
+            row = get_api_object_or_404(BatchClaim.objects.with_relations(), pk=pk, hard=hard_delete)
+            batch = row.batch
             if hard_delete:
                 row_id = row.id
                 row.delete()

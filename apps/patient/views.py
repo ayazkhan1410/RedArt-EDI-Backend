@@ -4,7 +4,6 @@ import traceback
 from django.db import IntegrityError
 from django.db.models import Q
 from django.http import Http404
-from django.shortcuts import get_object_or_404
 from drf_spectacular.utils import (
     OpenApiExample,
     OpenApiParameter,
@@ -16,7 +15,13 @@ from rest_framework.exceptions import NotFound, ValidationError
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.core.soft_delete import hard_delete_permission_error, parse_hard_flag
+from apps.core.soft_delete import (
+    client_error_message,
+    get_active_object_or_404,
+    get_api_object_or_404,
+    hard_delete_permission_error,
+    parse_hard_flag,
+)
 
 from apps.core.pagination import StandardPagination
 from apps.patient.models import Patient
@@ -200,7 +205,7 @@ class PatientListCreateAPIView(APIView):
 class PatientDetailAPIView(APIView):
     def get(self, request, pk):
         try:
-            patient = get_object_or_404(Patient, pk=pk)
+            patient = get_active_object_or_404(Patient, pk=pk)
             return success_response(
                 "Patient retrieved successfully.",
                 data=PatientSerializer(patient).data,
@@ -229,7 +234,7 @@ class PatientDetailAPIView(APIView):
 
     def _update(self, request, pk, partial):
         try:
-            patient = get_object_or_404(Patient, pk=pk)
+            patient = get_active_object_or_404(Patient, pk=pk)
             serializer = PatientSerializer(
                 patient,
                 data=request.data,
@@ -272,11 +277,11 @@ class PatientDetailAPIView(APIView):
 
     def delete(self, request, pk):
         try:
-            patient = get_object_or_404(Patient, pk=pk)
             hard_delete = parse_hard_flag(request)
             denied = hard_delete_permission_error(request, hard_delete)
             if denied is not None:
                 return denied
+            patient = get_api_object_or_404(Patient, pk=pk, hard=hard_delete)
 
             if hard_delete:
                 patient_id = patient.id

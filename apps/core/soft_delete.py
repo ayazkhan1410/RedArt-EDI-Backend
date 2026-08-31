@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from django.http import Http404
 from django.shortcuts import get_object_or_404
 from rest_framework import status
 
@@ -12,9 +11,21 @@ from apps.core.utils.responses import error_response
 def get_active_object_or_404(queryset, **kwargs):
     """Like get_object_or_404 but requires is_active=True when the model has it."""
     model = getattr(queryset, "model", None)
+    if model is None and hasattr(queryset, "_meta"):
+        model = queryset
     if model is not None and hasattr(model, "is_active"):
         kwargs.setdefault("is_active", True)
     return get_object_or_404(queryset, **kwargs)
+
+
+def get_api_object_or_404(queryset, *, hard: bool = False, **kwargs):
+    """
+    Resolve an object for API detail/update/delete.
+    Soft paths hide inactive rows (404). Hard delete may target any row.
+    """
+    if hard:
+        return get_object_or_404(queryset, **kwargs)
+    return get_active_object_or_404(queryset, **kwargs)
 
 
 def parse_hard_flag(request) -> bool:
@@ -41,6 +52,24 @@ def hard_delete_permission_error(request, hard: bool):
             status_code=status.HTTP_403_FORBIDDEN,
         )
     return None
+
+
+def client_error_message(exc, *, fallback: str = "Request failed.", max_length: int = 500) -> str:
+    """
+    Safe client-facing message from an exception.
+    Keeps short ValueError/Validation text; strips traceback-like payloads.
+    """
+    text = str(getattr(exc, "detail", None) or exc or "").strip()
+    if not text:
+        return fallback
+    lowered = text.lower()
+    if "traceback (most recent call last)" in lowered or "\n  file \"" in lowered:
+        return fallback
+    # Prefer first line only (avoid accidental multi-line dumps).
+    text = text.splitlines()[0].strip()
+    if len(text) > max_length:
+        text = text[: max_length - 1].rstrip() + "…"
+    return text or fallback
 
 
 # Back-compat alias used during rollout (raises — prefer hard_delete_permission_error).

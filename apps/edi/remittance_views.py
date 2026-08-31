@@ -5,10 +5,17 @@ from __future__ import annotations
 import logging
 import traceback
 
-from django.shortcuts import get_object_or_404
 from drf_spectacular.utils import OpenApiExample, extend_schema, extend_schema_view
 from rest_framework import status
 from rest_framework.views import APIView
+
+from apps.core.soft_delete import (
+    client_error_message,
+    get_active_object_or_404,
+    get_api_object_or_404,
+    hard_delete_permission_error,
+    parse_hard_flag,
+)
 
 from apps.core.pagination import StandardPagination
 from apps.core.utils.responses import error_response, success_response
@@ -119,7 +126,7 @@ class EDI835RemittanceImportAPIView(APIView):
                 status_code=http_status,
             )
         except ValueError as exc:
-            return error_response(str(exc), status_code=status.HTTP_400_BAD_REQUEST)
+            return error_response(client_error_message(exc), status_code=status.HTTP_400_BAD_REQUEST)
         except Exception:
             logger.error("Import 835 remittance failed:\n%s", traceback.format_exc())
             return error_response(
@@ -136,7 +143,7 @@ class EDI835RemittanceImportAPIView(APIView):
 class EDI835RemittanceDetailAPIView(APIView):
     def get(self, request, pk):
         try:
-            row = get_object_or_404(
+            row = get_active_object_or_404(
                 EDI835Remittance.objects.with_relations().filter(is_active=True),
                 pk=pk,
             )

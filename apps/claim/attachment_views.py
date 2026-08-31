@@ -4,7 +4,6 @@ import traceback
 from django.db import IntegrityError
 from django.db.models import Q
 from django.http import Http404
-from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from drf_spectacular.utils import (
     OpenApiExample,
@@ -17,7 +16,13 @@ from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.core.soft_delete import hard_delete_permission_error, parse_hard_flag
+from apps.core.soft_delete import (
+    client_error_message,
+    get_active_object_or_404,
+    get_api_object_or_404,
+    hard_delete_permission_error,
+    parse_hard_flag,
+)
 
 from apps.claim.choices import AttachmentSubmissionStatus
 from apps.claim.models import AttachmentSubmission
@@ -202,7 +207,7 @@ class AttachmentSubmissionListCreateAPIView(APIView):
 class AttachmentSubmissionDetailAPIView(APIView):
     def get(self, request, pk):
         try:
-            row = get_object_or_404(
+            row = get_active_object_or_404(
                 AttachmentSubmission.objects.with_relations(), pk=pk
             )
             return success_response(
@@ -233,7 +238,7 @@ class AttachmentSubmissionDetailAPIView(APIView):
 
     def _update(self, request, pk, partial):
         try:
-            row = get_object_or_404(
+            row = get_active_object_or_404(
                 AttachmentSubmission.objects.with_relations(), pk=pk
             )
             serializer = AttachmentSubmissionSerializer(
@@ -287,13 +292,14 @@ class AttachmentSubmissionDetailAPIView(APIView):
 
     def delete(self, request, pk):
         try:
-            row = get_object_or_404(
-                AttachmentSubmission.objects.with_relations(), pk=pk
-            )
             hard_delete = parse_hard_flag(request)
             denied = hard_delete_permission_error(request, hard_delete)
             if denied is not None:
                 return denied
+            row = get_api_object_or_404(
+                AttachmentSubmission.objects.with_relations(), pk=pk,
+                hard=hard_delete,
+            )
             if hard_delete:
                 row_id = row.id
                 row.delete()
