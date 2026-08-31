@@ -5,7 +5,7 @@ After cloud deploy: set `EDI_PUBLIC_BASE_URL` (see `docs/LOVABLE_EDI_DEPLOY.md`)
 Swagger: `{BASE}/api/docs/`  
 Auth: JWT Bearer from a **service user** (not the browser).
 
-**Lovable** hosts the RedArt **UI only**. This EDI API deploys on Render/Railway/VPS (`render.yaml`). Flow: `Lovable → RedArt backend → EDI API`.
+**Lovable:** start with [`docs/LOVABLE_QUICKSTART.md`](LOVABLE_QUICKSTART.md) and `GET /api/v1/integration/lovable/`.
 
 Create service user (one-time):
 

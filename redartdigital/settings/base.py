@@ -225,6 +225,10 @@ SPECTACULAR_SETTINGS = {
     "SECURITY": [{"bearerAuth": []}],
     "TAGS": [
         {
+            "name": "integration",
+            "description": "Lovable / RedArt integration catalog (endpoints, auth, happy path).",
+        },
+        {
             "name": "auth",
             "description": "JWT obtain / refresh / verify for RedArt server-to-server calls.",
         },

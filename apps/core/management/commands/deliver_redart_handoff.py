@@ -80,8 +80,8 @@ class Command(BaseCommand):
 
         pack = {
             "architecture": (
-                "Lovable UI → RedArt backend → EDI API (this service). "
-                "Do not put service password or long-lived JWT in the browser."
+                "Call EDI with JWT from RedArt/Lovable. "
+                "Start at GET /api/v1/integration/lovable/ and docs/LOVABLE_QUICKSTART.md."
             ),
             "edi_public_base_url": base,
             "health_url": f"{base}/api/health/",
@@ -93,18 +93,14 @@ class Command(BaseCommand):
             or "<ask-ops-for-password-or-use--create-user>",
             "auth_header": "Authorization: Bearer <access_from_token_url>",
             "lovable_notes": {
-                "hosts_ui_only": True,
-                "set_secret": (
-                    "VITE_EDI_API_BASE_URL is optional for demos; "
-                    "production should call RedArt backend which holds JWT secrets."
-                ),
-                "cors": (
-                    "Set EDI_ALLOW_LOVABLE_ORIGINS=true on EDI if browser "
-                    "calls are required for TEST."
-                ),
+                "quickstart": "docs/LOVABLE_QUICKSTART.md",
+                "catalog_url": f"{base}/api/v1/integration/lovable/",
+                "swagger_url": f"{base}/api/docs/",
+                "env": "VITE_EDI_API_BASE_URL + service username/password",
             },
             "samples_doc": "docs/REDART_API_SAMPLES.md",
             "deploy_doc": "docs/LOVABLE_EDI_DEPLOY.md",
+            "quickstart_doc": "docs/LOVABLE_QUICKSTART.md",
         }
 
         if options["as_json"]:
@@ -124,6 +120,7 @@ class Command(BaseCommand):
         )
         self.stdout.write("")
         self.stdout.write(pack["architecture"])
+        self.stdout.write(f"Lovable catalog:  {pack['lovable_notes']['catalog_url']}")
         self.stdout.write(
             "Deliver this block via 1Password / Signal — do not commit or paste into git."
         )
