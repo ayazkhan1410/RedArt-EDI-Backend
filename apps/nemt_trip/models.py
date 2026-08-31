@@ -34,6 +34,8 @@ class NemtTrip(BaseModel):
         blank=True,
     )
     mileage_units = models.PositiveIntegerField(null=True, blank=True)
+    driver_first_name = models.CharField(max_length=100, null=True, blank=True)
+    driver_last_name = models.CharField(max_length=100, null=True, blank=True)
     charge = models.DecimalField(
         max_digits=12,
         decimal_places=2,

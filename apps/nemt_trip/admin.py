@@ -14,6 +14,7 @@ class NemtTripAdmin(admin.ModelAdmin):
         "dropoff",
         "one_way_miles",
         "mileage_units",
+        "driver_last_name",
         "charge",
         "is_active",
         "created_at",
@@ -22,6 +23,8 @@ class NemtTripAdmin(admin.ModelAdmin):
     search_fields = (
         "pickup",
         "dropoff",
+        "driver_first_name",
+        "driver_last_name",
         "patient__first_name",
         "patient__last_name",
         "patient__medicaid_member_id",
@@ -46,6 +49,8 @@ class NemtTripAdmin(admin.ModelAdmin):
                     "dropoff",
                     "one_way_miles",
                     "mileage_units",
+                    "driver_first_name",
+                    "driver_last_name",
                     "charge",
                     "is_active",
                 )

@@ -42,6 +42,16 @@ class TransferLogStatus(models.TextChoices):
     FAILED = "FAILED", "Failed"
 
 
+class EDI999ImportStatus(models.TextChoices):
+    DISCOVERED = "DISCOVERED", "Discovered"
+    QUEUED = "QUEUED", "Queued"
+    DOWNLOADING = "DOWNLOADING", "Downloading"
+    PARSING = "PARSING", "Parsing"
+    IMPORTED = "IMPORTED", "Imported"
+    FAILED = "FAILED", "Failed"
+    SKIPPED = "SKIPPED", "Skipped"
+
+
 class SFTPAuthType(models.TextChoices):
     PASSWORD = "PASSWORD", "Password"
     PRIVATE_KEY = "PRIVATE_KEY", "Private key"

@@ -139,6 +139,10 @@ class Generate837PHandler:
                         "zip": provider.zip,
                         "phone": provider.phone,
                     },
+                    "driver": {
+                        "first_name": getattr(trip, "driver_first_name", None) or "",
+                        "last_name": getattr(trip, "driver_last_name", None) or "",
+                    },
                     "service_lines": lines,
                 }
             )
@@ -154,6 +158,8 @@ class Generate837PHandler:
                 "name": self.partner.name,
                 "sender_id": self.partner.sender_id,
                 "receiver_id": self.partner.receiver_id,
+                "contact_name": getattr(self.partner, "contact_name", None) or "",
+                "contact_phone": getattr(self.partner, "contact_phone", None) or "",
             },
             "control": {
                 "id": self.control.id,

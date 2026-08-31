@@ -3,7 +3,13 @@ from django.urls import path
 from apps.edi.ack_views import (
     EDIAcknowledgementApplyAPIView,
     EDIAcknowledgementDetailAPIView,
+    EDIAcknowledgementImport999APIView,
     EDIAcknowledgementListCreateAPIView,
+)
+from apps.edi.import_999_views import (
+    EDI999ImportDetailAPIView,
+    EDI999ImportListAPIView,
+    EDI999ImportPollAPIView,
 )
 from apps.edi.sftp_views import (
     SFTPCredentialsDetailAPIView,
@@ -92,9 +98,29 @@ urlpatterns = [
         name="edi-acknowledgement-apply",
     ),
     path(
+        "edi-acknowledgements/import-999/",
+        EDIAcknowledgementImport999APIView.as_view(),
+        name="edi-acknowledgement-import-999",
+    ),
+    path(
         "edi-acknowledgements/<int:pk>/",
         EDIAcknowledgementDetailAPIView.as_view(),
         name="edi-acknowledgement-detail",
+    ),
+    path(
+        "edi-999-imports/",
+        EDI999ImportListAPIView.as_view(),
+        name="edi-999-import-list",
+    ),
+    path(
+        "edi-999-imports/poll/",
+        EDI999ImportPollAPIView.as_view(),
+        name="edi-999-import-poll",
+    ),
+    path(
+        "edi-999-imports/<int:pk>/",
+        EDI999ImportDetailAPIView.as_view(),
+        name="edi-999-import-detail",
     ),
     path(
         "sftp-credentials/",

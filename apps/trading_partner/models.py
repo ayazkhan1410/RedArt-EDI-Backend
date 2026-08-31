@@ -8,6 +8,18 @@ class TradingPartner(BaseModel):
     name = models.CharField(max_length=500, blank=True, null=True)
     sender_id = models.CharField(max_length=255, null=True, blank=True)
     receiver_id = models.CharField(max_length=255, null=True, blank=True)
+    contact_name = models.CharField(
+        max_length=255,
+        null=True,
+        blank=True,
+        help_text="1000A PER contact name (submitter contact).",
+    )
+    contact_phone = models.CharField(
+        max_length=32,
+        null=True,
+        blank=True,
+        help_text="1000A PER telephone (digits preferred).",
+    )
     environment = models.CharField(
         max_length=20,
         choices=Environment.choices,

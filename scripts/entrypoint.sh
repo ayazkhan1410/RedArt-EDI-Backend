@@ -112,7 +112,26 @@ PeriodicTask.objects.update_or_create(
         "description": "Flush Celery Redis result storage every 24 hours (00:00 UTC).",
     },
 )
-print("[entrypoint] Beat schedule ready: cleanup-celery-storage-every-24h")
+
+hourly, _ = CrontabSchedule.objects.get_or_create(
+    minute="0",
+    hour="*",
+    day_of_week="*",
+    day_of_month="*",
+    month_of_year="*",
+    timezone="UTC",
+)
+PeriodicTask.objects.update_or_create(
+    name="poll-edi-999-imports-hourly",
+    defaults={
+        "crontab": hourly,
+        "interval": None,
+        "task": "apps.edi.tasks.poll_edi_999_imports",
+        "enabled": True,
+        "description": "Import 999: poll SFTP inbound folders hourly and queue Celery imports.",
+    },
+)
+print("[entrypoint] Beat schedule ready: cleanup-celery-storage-every-24h, poll-edi-999-imports-hourly")
 PY
 }
 

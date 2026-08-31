@@ -8,6 +8,7 @@ from apps.edi.choices import (
     TransactionType,
 )
 from apps.edi.models import (
+    EDI999Import,
     EDIAcknowledgement,
     EDIControlNumber,
     EDIFile,
@@ -462,3 +463,86 @@ class ApplyEDIAcknowledgementSerializer(serializers.Serializer):
 
     def validate_message(self, value):
         return clean_optional_text(value)
+
+
+class Import999AcknowledgementSerializer(serializers.Serializer):
+    content = serializers.CharField()
+    batch_id = serializers.IntegerField()
+    edi_file_id = serializers.IntegerField(required=False, allow_null=True)
+    raw_file_ref = serializers.CharField(
+        required=False, allow_blank=True, allow_null=True
+    )
+    apply_claim_status = serializers.BooleanField(required=False, default=True)
+
+    def validate_content(self, value):
+        text = (value or "").strip()
+        if not text:
+            raise serializers.ValidationError("content is required.")
+        return text
+
+    def validate_raw_file_ref(self, value):
+        return clean_optional_text(value)
+
+
+class EDI999ImportSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = EDI999Import
+        fields = (
+            "id",
+            "credentials",
+            "directory",
+            "batch",
+            "edi_file",
+            "acknowledgement",
+            "filename",
+            "remote_path",
+            "file_hash",
+            "status",
+            "attempt",
+            "celery_task_id",
+            "message",
+            "detail",
+            "started_at",
+            "finished_at",
+            "is_active",
+            "created_at",
+            "updated_at",
+        )
+        read_only_fields = fields
+
+
+class EDI999ImportListSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = EDI999Import
+        fields = (
+            "id",
+            "credentials",
+            "directory",
+            "batch",
+            "edi_file",
+            "acknowledgement",
+            "filename",
+            "remote_path",
+            "file_hash",
+            "status",
+            "attempt",
+            "celery_task_id",
+            "message",
+            "started_at",
+            "finished_at",
+            "is_active",
+            "created_at",
+        )
+        read_only_fields = fields
+
+
+class PollEDI999ImportsSerializer(serializers.Serializer):
+    """Manual trigger for Import 999 SFTP poller."""
+
+    credentials_id = serializers.IntegerField(required=False, allow_null=True)
+    batch_id = serializers.IntegerField(required=False, allow_null=True)
+    async_mode = serializers.BooleanField(
+        required=False,
+        default=True,
+        help_text="If true, enqueue Celery poll_edi_999_imports; else run discover+queue inline.",
+    )

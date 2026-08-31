@@ -10,13 +10,14 @@ class TradingPartnerAdmin(admin.ModelAdmin):
         "name",
         "sender_id",
         "receiver_id",
+        "contact_name",
         "environment",
         "is_active",
         "created_at",
         "updated_at",
     )
     list_filter = ("environment", "is_active", "created_at")
-    search_fields = ("name", "sender_id", "receiver_id")
+    search_fields = ("name", "sender_id", "receiver_id", "contact_name")
     ordering = ("-id",)
     list_per_page = 50
     readonly_fields = ("id", "created_at", "updated_at")
@@ -29,6 +30,8 @@ class TradingPartnerAdmin(admin.ModelAdmin):
                     "name",
                     "sender_id",
                     "receiver_id",
+                    "contact_name",
+                    "contact_phone",
                     "environment",
                     "is_active",
                 )

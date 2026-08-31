@@ -12,6 +12,8 @@ WRITE_FIELDS = (
     "dropoff",
     "one_way_miles",
     "mileage_units",
+    "driver_first_name",
+    "driver_last_name",
     "charge",
     "is_active",
 )
@@ -34,6 +36,8 @@ class NemtTripSerializer(serializers.ModelSerializer):
             "dropoff",
             "one_way_miles",
             "mileage_units",
+            "driver_first_name",
+            "driver_last_name",
             "charge",
             "is_active",
             "created_at",
@@ -82,6 +86,12 @@ class NemtTripSerializer(serializers.ModelSerializer):
     def validate_dropoff(self, value):
         return clean_optional_text(value)
 
+    def validate_driver_first_name(self, value):
+        return clean_optional_text(value)
+
+    def validate_driver_last_name(self, value):
+        return clean_optional_text(value)
+
     def validate_one_way_miles(self, value):
         return ensure_non_negative(value, "one_way_miles")
 
@@ -126,6 +136,8 @@ class NemtTripListSerializer(serializers.ModelSerializer):
             "dropoff",
             "one_way_miles",
             "mileage_units",
+            "driver_first_name",
+            "driver_last_name",
             "charge",
             "is_active",
             "created_at",

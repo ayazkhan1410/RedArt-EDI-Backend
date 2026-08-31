@@ -14,6 +14,8 @@ class TradingPartnerSerializer(serializers.ModelSerializer):
             "name",
             "sender_id",
             "receiver_id",
+            "contact_name",
+            "contact_phone",
             "environment",
             "is_active",
             "created_at",

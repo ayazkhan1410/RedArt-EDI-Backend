@@ -19,4 +19,9 @@ app.conf.beat_schedule = {
         # Daily at 00:00 UTC
         "schedule": crontab(minute=0, hour=0),
     },
+    "poll-edi-999-imports-hourly": {
+        "task": "apps.edi.tasks.poll_edi_999_imports",
+        # Every hour at :00
+        "schedule": crontab(minute=0),
+    },
 }
