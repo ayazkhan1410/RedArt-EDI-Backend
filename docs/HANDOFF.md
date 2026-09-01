@@ -7,6 +7,8 @@ Use this on any machine. Open a **new** Cursor chat and say:
 Branch: **`Ayaz/local-main`**  
 Repo: https://github.com/ayazkhan1410/RedArt-EDI-Backend
 
+**Docs for humans:** [`API_USER_GUIDE.md`](API_USER_GUIDE.md) · [`DEPLOYMENT_GUIDE.md`](DEPLOYMENT_GUIDE.md)
+
 ---
 
 ## What this project is
