@@ -157,6 +157,9 @@ Local Docker: `http://127.0.0.1:7000`
 | Long-distance pilot | `POST /api/v1/pilot/long-distance/` |
 | Lovable catalog | `GET /api/v1/integration/lovable/` |
 
+**New to this API?** Start with [`docs/API_USER_GUIDE.md`](API_USER_GUIDE.md).  
+**Deploying?** See [`docs/DEPLOYMENT_GUIDE.md`](DEPLOYMENT_GUIDE.md).
+
 Production attachment (when `ATTACHMENT_PRODUCTION_MODE=true`):
 
 - `ATTACHMENT_MFT_ENABLED=true`

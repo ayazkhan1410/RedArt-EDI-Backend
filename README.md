@@ -7,6 +7,8 @@ This repo is the **EDI backend only** — not the RedArt frontend or RedArt’s 
 
 | Resource | Location |
 |----------|----------|
+| **API user guide (start here)** | [`docs/API_USER_GUIDE.md`](docs/API_USER_GUIDE.md) |
+| **Deployment guide** | [`docs/DEPLOYMENT_GUIDE.md`](docs/DEPLOYMENT_GUIDE.md) |
 | API handoff (integration contract) | `RedArt_EDI_API_Integration_Handoff.pdf` |
 | Long-distance attachment guide | `RedArt_52Plus_NEMT_Attachment_Workflow_Developer_Guide.pdf` |
 | Integration samples | `docs/REDART_API_SAMPLES.md` |
@@ -143,6 +145,14 @@ docker compose exec backend python manage.py migrate
 
 See **`.env.example`** for Dev vs Prod required variables.
 
+## Documentation
+
+| Guide | Audience |
+|-------|----------|
+| [`docs/API_USER_GUIDE.md`](docs/API_USER_GUIDE.md) | New integrators — auth, endpoints, responses, workflows |
+| [`docs/DEPLOYMENT_GUIDE.md`](docs/DEPLOYMENT_GUIDE.md) | DevOps — Docker, Render, env vars, handoff |
+| [`docs/REDART_API_SAMPLES.md`](docs/REDART_API_SAMPLES.md) | Copy-paste curl examples |
+
 ## Key integration endpoints
 
 | Step | Endpoint |
@@ -160,7 +170,7 @@ See **`.env.example`** for Dev vs Prod required variables.
 | Import 277 / poll | `POST /api/v1/edi-acknowledgements/import-277/` · `POST /api/v1/edi-277-imports/poll/` |
 | Long-distance pilot | `POST /api/v1/pilot/long-distance/` |
 
-Full examples: `docs/REDART_API_SAMPLES.md`
+Full examples: `docs/REDART_API_SAMPLES.md` · Complete reference: `docs/API_USER_GUIDE.md`
 
 ## Settings
 
