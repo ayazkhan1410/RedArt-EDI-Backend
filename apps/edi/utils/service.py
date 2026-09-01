@@ -11,7 +11,7 @@ from apps.edi.choices import (
     EDIFileStatus,
     TransactionType,
 )
-from apps.edi.models import EDIAcknowledgement, EDIControlNumber, EDIFile
+from apps.edi.models import EDIAcknowledgement, EDIControlNumber, EDIFile, EDIValidationReport
 from apps.edi.utils.readiness import assert_batch_ready_for_837p_generation
 
 
@@ -430,3 +430,114 @@ def import_999_acknowledgement(
         message=parsed.get("message"),
         apply_claim_status=apply_claim_status,
     ), parsed
+
+
+@transaction.atomic
+def apply_277_claim_statuses(parsed: dict) -> list[int]:
+    """Apply parsed 277 STC lines to matching active claims by claim_number."""
+    updated = []
+    for line in parsed.get("claim_statuses") or []:
+        claim_number = (line.get("claim_number") or "").strip()
+        outcome = line.get("outcome")
+        if not claim_number or not outcome:
+            continue
+        claim = (
+            Claim.objects.select_for_update()
+            .filter(claim_number__iexact=claim_number, is_active=True)
+            .first()
+        )
+        if claim is None:
+            continue
+        if claim.status in (ClaimStatus.PAID, ClaimStatus.DENIED):
+            continue
+        if claim.status != outcome:
+            claim.status = outcome
+            claim.save(update_fields=["status", "updated_at"])
+            updated.append(claim.id)
+    return updated
+
+
+@transaction.atomic
+def import_277_acknowledgement(
+    *,
+    content,
+    batch_id,
+    edi_file_id=None,
+    raw_file_ref=None,
+    apply_claim_status=True,
+):
+    """Parse raw 277 X12, persist EDIAcknowledgement, apply claim statuses."""
+    from apps.edi.utils.x12 import parse_277
+
+    parsed = parse_277(content)
+    ack, _ = apply_edi_acknowledgement(
+        batch_id=batch_id,
+        ack_type=parsed["ack_type"],
+        status=parsed["status"],
+        affected_st02=parsed.get("affected_st02"),
+        raw_file_ref=raw_file_ref,
+        edi_file_id=edi_file_id,
+        message=parsed.get("message"),
+        apply_claim_status=False,
+    )
+    claim_ids = []
+    if apply_claim_status:
+        claim_ids = apply_277_claim_statuses(parsed)
+    return (ack, claim_ids), parsed
+
+
+@transaction.atomic
+def import_validation_report(
+    *,
+    content: str,
+    batch_id=None,
+    edi_file_id=None,
+    raw_file_ref=None,
+    file_name=None,
+):
+    """Parse Edifecs XML report and persist EDIValidationReport (idempotent hash)."""
+    from apps.edi.models import EDIValidationReport, EDIFile
+    from apps.edi.utils.edifecs_report import parse_edifecs_report
+
+    parsed = parse_edifecs_report(content, file_name=file_name)
+    existing = (
+        EDIValidationReport.objects.filter(
+            file_hash=parsed["file_hash"],
+            is_active=True,
+        ).first()
+    )
+    if existing is not None:
+        return existing, parsed, False
+
+    batch = None
+    if batch_id:
+        batch = SubmissionBatch.objects.filter(pk=batch_id, is_active=True).first()
+        if batch is None:
+            raise ValueError("Batch not found or inactive.")
+
+    edi_file = None
+    if edi_file_id:
+        edi_file = EDIFile.objects.filter(pk=edi_file_id, is_active=True).first()
+        if edi_file is None:
+            raise ValueError("EDI file not found or inactive.")
+        if batch is None and edi_file.batch_id:
+            batch = edi_file.batch
+
+    row = EDIValidationReport.objects.create(
+        batch=batch,
+        edi_file=edi_file,
+        report_type=parsed["report_type"],
+        status=parsed["status"],
+        task_id=parsed.get("task_id"),
+        report_guid=parsed.get("report_guid"),
+        file_name=parsed.get("file_name"),
+        file_hash=parsed.get("file_hash"),
+        error_count=parsed.get("error_count") or 0,
+        accepted_claims=parsed.get("accepted_claims"),
+        accepted_charge=parsed.get("accepted_charge"),
+        raw_file_ref=(raw_file_ref or "").strip() or None,
+        message=parsed.get("message"),
+        parsed_summary=parsed.get("parsed_summary"),
+        is_active=True,
+    )
+    return row, parsed, True

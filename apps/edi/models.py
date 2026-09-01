@@ -13,6 +13,8 @@ from apps.edi.choices import (
     TransactionType,
     TransferChannel,
     TransferLogStatus,
+    ValidationReportStatus,
+    ValidationReportType,
 )
 from apps.trading_partner.choices import Environment
 
@@ -781,3 +783,81 @@ class EDI835ClaimPayment(BaseModel):
 
     def __str__(self):
         return f"835 CLP {self.claim_number} {self.outcome} #{self.pk}"
+
+
+class EDIValidationReportQuerySet(models.QuerySet):
+    def with_relations(self):
+        return self.select_related(
+            "batch",
+            "batch__trading_partner",
+            "edi_file",
+        )
+
+
+class EDIValidationReport(BaseModel):
+    """
+    Edifecs STCO validation report (Summary / Audit / LDNS XML).
+    Complements X12 999 for batch acceptance visibility.
+    """
+
+    batch = models.ForeignKey(
+        "claim.SubmissionBatch",
+        on_delete=models.SET_NULL,
+        related_name="validation_reports",
+        null=True,
+        blank=True,
+    )
+    edi_file = models.ForeignKey(
+        EDIFile,
+        on_delete=models.SET_NULL,
+        related_name="validation_reports",
+        null=True,
+        blank=True,
+    )
+    report_type = models.CharField(
+        max_length=16,
+        choices=ValidationReportType.choices,
+        default=ValidationReportType.SUMMARY,
+    )
+    status = models.CharField(
+        max_length=32,
+        choices=ValidationReportStatus.choices,
+        default=ValidationReportStatus.UNKNOWN,
+    )
+    task_id = models.CharField(max_length=128, null=True, blank=True)
+    report_guid = models.CharField(max_length=64, null=True, blank=True)
+    file_name = models.CharField(max_length=255, null=True, blank=True)
+    file_hash = models.CharField(max_length=128, null=True, blank=True)
+    error_count = models.PositiveIntegerField(default=0, null=True, blank=True)
+    accepted_claims = models.PositiveIntegerField(null=True, blank=True)
+    accepted_charge = models.DecimalField(
+        max_digits=14, decimal_places=2, null=True, blank=True
+    )
+    raw_file_ref = models.CharField(max_length=1024, null=True, blank=True)
+    message = models.CharField(max_length=500, null=True, blank=True)
+    parsed_summary = models.JSONField(null=True, blank=True)
+    is_active = models.BooleanField(default=True)
+
+    objects = EDIValidationReportQuerySet.as_manager()
+
+    class Meta:
+        verbose_name = "EDI Validation Report"
+        verbose_name_plural = "EDI Validation Reports"
+        ordering = ("-id",)
+        indexes = [
+            models.Index(fields=["task_id"], name="edi_valrep_task_idx"),
+            models.Index(
+                fields=["report_type", "status"],
+                name="edi_valrep_type_status_idx",
+            ),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["file_hash"],
+                condition=models.Q(file_hash__isnull=False, is_active=True),
+                name="uniq_active_validation_report_hash",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.report_type} {self.status} task={self.task_id} #{self.pk}"

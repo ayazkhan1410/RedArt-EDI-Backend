@@ -79,3 +79,19 @@ class SFTPDirectoryPurpose(models.TextChoices):
     INBOUND_277 = "INBOUND_277", "Inbound 277"
     INBOUND_835 = "INBOUND_835", "Inbound 835"
     GENERAL = "GENERAL", "General send/receive"
+
+
+class ValidationReportType(models.TextChoices):
+    SUMMARY = "SUMMARY", "Summary / audit summary"
+    AUDIT = "AUDIT", "Audit report"
+    LDNS = "LDNS", "Long-distance / data validation"
+
+
+class ValidationReportStatus(models.TextChoices):
+    PASSED = "PASSED", "Passed"
+    ACCEPTED = "ACCEPTED", "Accepted"
+    FAILED = "FAILED", "Failed"
+    REJECTED = "REJECTED", "Rejected"
+    PARTIAL = "PARTIAL", "Partial"
+    ERROR = "ERROR", "Error"
+    UNKNOWN = "UNKNOWN", "Unknown"

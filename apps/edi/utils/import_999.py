@@ -224,7 +224,7 @@ def process_edi_999_import(import_id, *, batch_id=None):
     """
     with transaction.atomic():
         row = (
-            EDI999Import.objects.select_for_update()
+            EDI999Import.objects.select_for_update(of=("self",))
             .select_related(
                 "credentials",
                 "directory",

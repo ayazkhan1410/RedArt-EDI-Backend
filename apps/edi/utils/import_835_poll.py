@@ -153,7 +153,7 @@ def discover_edi_835_imports(*, credentials_id=None):
 def process_edi_835_import(import_id):
     with transaction.atomic():
         row = (
-            EDI835Import.objects.select_for_update()
+            EDI835Import.objects.select_for_update(of=("self",))
             .select_related("credentials", "directory", "remittance")
             .filter(pk=import_id, is_active=True)
             .first()

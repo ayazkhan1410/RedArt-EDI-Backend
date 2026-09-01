@@ -16,6 +16,7 @@ from apps.edi.models import (
     EDIControlNumber,
     EDIFile,
     EDIFileTransferLog,
+    EDIValidationReport,
 )
 from apps.edi.utils.validators import (
     clean_control_digits,
@@ -709,3 +710,99 @@ class PollEDI835ImportsSerializer(serializers.Serializer):
         default=True,
         help_text="If true, enqueue Celery poll_edi_835_imports; else run discover+queue inline.",
     )
+
+
+class Import277AcknowledgementSerializer(serializers.Serializer):
+    content = serializers.CharField()
+    batch_id = serializers.IntegerField()
+    edi_file_id = serializers.IntegerField(required=False, allow_null=True)
+    raw_file_ref = serializers.CharField(
+        required=False, allow_blank=True, allow_null=True
+    )
+    apply_claim_status = serializers.BooleanField(required=False, default=True)
+
+    def validate_content(self, value):
+        from django.conf import settings
+
+        text = (value or "").strip()
+        if not text:
+            raise serializers.ValidationError("content is required.")
+        max_chars = int(getattr(settings, "EDI_MAX_X12_CONTENT_CHARS", 2_000_000))
+        if len(text) > max_chars:
+            raise serializers.ValidationError("content exceeds maximum size.")
+        return text
+
+    def validate_raw_file_ref(self, value):
+        return clean_optional_text(value)
+
+
+class ImportValidationReportSerializer(serializers.Serializer):
+    content = serializers.CharField()
+    batch_id = serializers.IntegerField(required=False, allow_null=True)
+    edi_file_id = serializers.IntegerField(required=False, allow_null=True)
+    raw_file_ref = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    file_name = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+
+    def validate_content(self, value):
+        text = (value or "").strip()
+        if not text:
+            raise serializers.ValidationError("content is required.")
+        if len(text) > 5_000_000:
+            raise serializers.ValidationError("content exceeds maximum size.")
+        return text
+
+    def validate_raw_file_ref(self, value):
+        return clean_optional_text(value)
+
+    def validate_file_name(self, value):
+        return clean_optional_text(value)
+
+
+class EDIValidationReportSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = EDIValidationReport
+        fields = (
+            "id",
+            "batch",
+            "edi_file",
+            "report_type",
+            "status",
+            "task_id",
+            "report_guid",
+            "file_name",
+            "file_hash",
+            "error_count",
+            "accepted_claims",
+            "accepted_charge",
+            "raw_file_ref",
+            "message",
+            "parsed_summary",
+            "is_active",
+            "created_at",
+            "updated_at",
+        )
+        read_only_fields = fields
+
+
+class EDIValidationReportListSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = EDIValidationReport
+        fields = (
+            "id",
+            "batch",
+            "edi_file",
+            "report_type",
+            "status",
+            "task_id",
+            "file_name",
+            "error_count",
+            "accepted_claims",
+            "accepted_charge",
+            "is_active",
+            "created_at",
+        )
+        read_only_fields = fields
+
+
+class EDIValidationReportIdSerializer(serializers.Serializer):
+    id = serializers.IntegerField(read_only=True)

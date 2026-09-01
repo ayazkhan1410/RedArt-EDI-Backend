@@ -16,6 +16,7 @@ from apps.claim.document_views import (
     ClaimDocumentListCreateAPIView,
     ClaimDocumentStatusAPIView,
 )
+from apps.claim.pilot_views import LongDistancePilotAPIView
 from apps.claim.status_views import (
     ClaimStatusAPIView,
     ClaimValidateAPIView,
@@ -45,6 +46,11 @@ urlpatterns = [
         "claims/attachment-dashboard/",
         ClaimAttachmentDashboardAPIView.as_view(),
         name="claim-attachment-dashboard",
+    ),
+    path(
+        "pilot/long-distance/",
+        LongDistancePilotAPIView.as_view(),
+        name="pilot-long-distance",
     ),
     path(
         "claims/from-trip/",
