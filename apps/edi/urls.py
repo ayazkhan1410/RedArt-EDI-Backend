@@ -11,10 +11,16 @@ from apps.edi.import_835_views import (
     EDI835ImportListAPIView,
     EDI835ImportPollAPIView,
 )
+from apps.edi.import_277_views import EDIAcknowledgementImport277APIView
 from apps.edi.import_999_views import (
     EDI999ImportDetailAPIView,
     EDI999ImportListAPIView,
     EDI999ImportPollAPIView,
+)
+from apps.edi.validation_report_views import (
+    EDIValidationReportDetailAPIView,
+    EDIValidationReportImportAPIView,
+    EDIValidationReportListAPIView,
 )
 from apps.edi.remittance_views import (
     EDI835RemittanceDetailAPIView,
@@ -111,6 +117,26 @@ urlpatterns = [
         "edi-acknowledgements/import-999/",
         EDIAcknowledgementImport999APIView.as_view(),
         name="edi-acknowledgement-import-999",
+    ),
+    path(
+        "edi-acknowledgements/import-277/",
+        EDIAcknowledgementImport277APIView.as_view(),
+        name="edi-acknowledgement-import-277",
+    ),
+    path(
+        "edi-validation-reports/",
+        EDIValidationReportListAPIView.as_view(),
+        name="edi-validation-report-list",
+    ),
+    path(
+        "edi-validation-reports/import/",
+        EDIValidationReportImportAPIView.as_view(),
+        name="edi-validation-report-import",
+    ),
+    path(
+        "edi-validation-reports/<int:pk>/",
+        EDIValidationReportDetailAPIView.as_view(),
+        name="edi-validation-report-detail",
     ),
     path(
         "edi-835-remittances/",

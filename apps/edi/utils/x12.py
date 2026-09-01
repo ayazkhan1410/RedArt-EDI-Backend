@@ -348,3 +348,102 @@ def parse_835(raw: str) -> dict:
         "claims": claims,
         "transaction_type": "835",
     }
+
+
+_277_DENIED_PREFIXES = frozenset({"A3", "A4", "A7", "A8", "R"})
+_277_ACCEPTED_PREFIXES = frozenset({"A2", "A1", "A0"})
+
+
+def map_277_stc_to_outcome(stc01: str) -> str:
+    """Map STC01 health care claim status category → claim outcome label."""
+    from apps.claim.choices import ClaimStatus
+
+    prefix = str(stc01 or "").strip().upper().split(":")[0]
+    if prefix in _277_DENIED_PREFIXES:
+        return ClaimStatus.DENIED
+    if prefix in _277_ACCEPTED_PREFIXES:
+        return ClaimStatus.UNDER_REVIEW
+    return ClaimStatus.UNDER_REVIEW
+
+
+def map_277_aggregate_status(lines: list[dict]) -> str:
+    """Aggregate line outcomes into AcknowledgementStatus."""
+    if not lines:
+        return AcknowledgementStatus.ERROR
+    from apps.claim.choices import ClaimStatus
+
+    outcomes = {line.get("outcome") for line in lines}
+    if outcomes == {ClaimStatus.DENIED}:
+        return AcknowledgementStatus.REJECTED
+    if ClaimStatus.DENIED in outcomes:
+        return AcknowledgementStatus.PARTIAL
+    if ClaimStatus.UNDER_REVIEW in outcomes:
+        return AcknowledgementStatus.ACCEPTED
+    return AcknowledgementStatus.ACCEPTED
+
+
+def parse_277(raw: str) -> dict:
+    """
+    Parse HIPAA 277 / 277CA claim status response (minimal CLP/TRN/REF/STC walk).
+    """
+    segments = parse_x12(raw)
+    if not segments:
+        raise ValueError("Empty X12 content.")
+
+    by_id = segments_by_id(segments)
+    st = (by_id.get("ST") or [None])[0]
+    st01 = _el(st, 1)
+    if st01 and st01 != "277":
+        raise ValueError(f"Expected ST*277, got ST*{st01}.")
+
+    isa = (by_id.get("ISA") or [None])[0]
+    gs = (by_id.get("GS") or [None])[0]
+
+    claim_lines = []
+    current_claim_number = None
+    current_tracking = None
+
+    for seg in segments:
+        sid = seg.get("id")
+        if sid == "TRN":
+            trn01 = _el(seg, 1)
+            if trn01 == "2":
+                current_tracking = _el(seg, 2)
+                current_claim_number = None
+        elif sid == "REF":
+            qualifier = str(_el(seg, 1) or "").upper()
+            if qualifier in ("1K", "D9", "EA", "F8"):
+                current_claim_number = str(_el(seg, 2) or "").strip() or current_claim_number
+        elif sid == "STC":
+            stc01 = str(_el(seg, 1) or "")
+            outcome = map_277_stc_to_outcome(stc01)
+            claim_number = current_claim_number or current_tracking
+            if not claim_number:
+                continue
+            claim_lines.append(
+                {
+                    "claim_number": claim_number,
+                    "tracking_number": current_tracking,
+                    "stc_code": stc01,
+                    "outcome": outcome,
+                }
+            )
+
+    if not claim_lines:
+        raise ValueError("No TRN/STC claim status lines found in 277 content.")
+
+    message_parts = [f"STC_COUNT={len(claim_lines)}"]
+    agg = map_277_aggregate_status(claim_lines)
+    message_parts.append(f"AGG={agg}")
+
+    return {
+        "segments": segments,
+        "by_id": {k: v for k, v in by_id.items()},
+        "ack_type": AcknowledgementType.X277,
+        "status": agg,
+        "affected_st02": _el(st, 2),
+        "gs06": _el(gs, 6),
+        "isa13": _el(isa, 13),
+        "message": "; ".join(message_parts),
+        "claim_statuses": claim_lines,
+    }

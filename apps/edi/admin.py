@@ -9,6 +9,7 @@ from apps.edi.models import (
     EDIControlNumber,
     EDIFile,
     EDIFileTransferLog,
+    EDIValidationReport,
     SFTPCredentials,
     SFTPDirectory,
 )
@@ -97,6 +98,26 @@ class EDIAcknowledgementAdmin(admin.ModelAdmin):
     )
     autocomplete_fields = ("batch", "edi_file")
     readonly_fields = ("id", "created_at", "updated_at")
+
+
+@admin.register(EDIValidationReport)
+class EDIValidationReportAdmin(admin.ModelAdmin):
+    list_display = (
+        "id",
+        "report_type",
+        "status",
+        "task_id",
+        "batch",
+        "edi_file",
+        "error_count",
+        "accepted_claims",
+        "is_active",
+        "created_at",
+    )
+    list_filter = ("report_type", "status", "is_active")
+    search_fields = ("task_id", "file_name", "file_hash", "report_guid", "message")
+    autocomplete_fields = ("batch", "edi_file")
+    readonly_fields = ("id", "created_at", "updated_at", "file_hash", "parsed_summary")
 
 
 @admin.register(SFTPCredentials)

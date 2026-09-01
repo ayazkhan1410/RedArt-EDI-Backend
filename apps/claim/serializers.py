@@ -711,3 +711,41 @@ class AttachmentSubmissionListSerializer(serializers.ModelSerializer):
 class AttachmentSubmissionIdSerializer(serializers.Serializer):
     id = serializers.IntegerField(read_only=True)
 
+
+class LongDistancePilotSerializer(serializers.Serializer):
+    claim_id = serializers.IntegerField()
+    trading_partner_id = serializers.IntegerField()
+    batch_number = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    environment = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    submit_attachments = serializers.BooleanField(required=False, default=True)
+    attachment_channel = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    attachment_reference = serializers.CharField(
+        required=False, allow_blank=True, allow_null=True
+    )
+    queue_upload = serializers.BooleanField(required=False, default=False)
+    upload_async = serializers.BooleanField(required=False, default=True)
+
+    def validate_batch_number(self, value):
+        return clean_optional_text(value)
+
+    def validate_environment(self, value):
+        value = clean_optional_text(value)
+        if value is None:
+            return value
+        value = value.upper()
+        if value not in Environment.values:
+            raise serializers.ValidationError("Invalid environment.")
+        return value
+
+    def validate_attachment_channel(self, value):
+        value = clean_optional_text(value)
+        if value is None:
+            return value
+        value = value.upper()
+        if value not in AttachmentRoute.values or value == AttachmentRoute.NONE:
+            raise serializers.ValidationError("Invalid attachment channel.")
+        return value
+
+    def validate_attachment_reference(self, value):
+        return clean_optional_text(value)
+
