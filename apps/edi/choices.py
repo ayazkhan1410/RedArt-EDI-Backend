@@ -74,6 +74,7 @@ class SFTPAuthType(models.TextChoices):
 
 class SFTPDirectoryPurpose(models.TextChoices):
     OUTBOUND_837P = "OUTBOUND_837P", "Outbound 837P"
+    OUTBOUND_ATTACHMENT = "OUTBOUND_ATTACHMENT", "Outbound attachments"
     INBOUND_999 = "INBOUND_999", "Inbound 999"
     INBOUND_277 = "INBOUND_277", "Inbound 277"
     INBOUND_835 = "INBOUND_835", "Inbound 835"
