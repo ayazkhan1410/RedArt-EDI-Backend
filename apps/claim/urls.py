@@ -23,6 +23,7 @@ from apps.claim.status_views import (
     SubmissionBatchStatusAPIView,
 )
 from apps.claim.workflow_views import (
+    AttachmentBulkReviewAPIView,
     AttachmentSubmissionSubmitAPIView,
     ClaimAttachmentDashboardAPIView,
     ClaimAttachmentQueueAPIView,
@@ -97,6 +98,11 @@ urlpatterns = [
         "attachment-submissions/submit/",
         AttachmentSubmissionSubmitAPIView.as_view(),
         name="attachment-submission-submit",
+    ),
+    path(
+        "attachment-submissions/bulk-review/",
+        AttachmentBulkReviewAPIView.as_view(),
+        name="attachment-submission-bulk-review",
     ),
     path(
         "attachment-submissions/",

@@ -1,6 +1,7 @@
 from django.contrib import admin
 
 from apps.edi.models import (
+    EDI277Import,
     EDI999Import,
     EDI835ClaimPayment,
     EDI835Import,
@@ -118,6 +119,38 @@ class EDIValidationReportAdmin(admin.ModelAdmin):
     search_fields = ("task_id", "file_name", "file_hash", "report_guid", "message")
     autocomplete_fields = ("batch", "edi_file")
     readonly_fields = ("id", "created_at", "updated_at", "file_hash", "parsed_summary")
+
+
+@admin.register(EDI277Import)
+class EDI277ImportAdmin(admin.ModelAdmin):
+    list_display = (
+        "id",
+        "filename",
+        "status",
+        "credentials",
+        "batch",
+        "acknowledgement",
+        "attempt",
+        "celery_task_id",
+        "is_active",
+        "created_at",
+    )
+    list_filter = ("status", "is_active")
+    search_fields = (
+        "filename",
+        "remote_path",
+        "file_hash",
+        "celery_task_id",
+        "message",
+    )
+    autocomplete_fields = (
+        "credentials",
+        "directory",
+        "batch",
+        "edi_file",
+        "acknowledgement",
+    )
+    readonly_fields = ("id", "created_at", "updated_at", "started_at", "finished_at")
 
 
 @admin.register(SFTPCredentials)

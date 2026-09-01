@@ -416,6 +416,112 @@ class EDI999Import(BaseModel):
         return f"{self.filename} {self.status} #{self.pk}"
 
 
+class EDI277ImportQuerySet(models.QuerySet):
+    def with_relations(self):
+        return self.select_related(
+            "credentials",
+            "credentials__trading_partner",
+            "directory",
+            "acknowledgement",
+            "acknowledgement__batch",
+            "batch",
+            "edi_file",
+        )
+
+
+class EDI277Import(BaseModel):
+    """
+    Track one inbound 277 file discovered on SFTP through import outcome.
+    Idempotent on credentials + remote_path (and file_hash when set).
+    """
+
+    credentials = models.ForeignKey(
+        "edi.SFTPCredentials",
+        on_delete=models.PROTECT,
+        related_name="edi_277_imports",
+        null=True,
+        blank=True,
+    )
+    directory = models.ForeignKey(
+        "edi.SFTPDirectory",
+        on_delete=models.SET_NULL,
+        related_name="edi_277_imports",
+        null=True,
+        blank=True,
+    )
+    batch = models.ForeignKey(
+        "claim.SubmissionBatch",
+        on_delete=models.SET_NULL,
+        related_name="edi_277_imports",
+        null=True,
+        blank=True,
+    )
+    edi_file = models.ForeignKey(
+        EDIFile,
+        on_delete=models.SET_NULL,
+        related_name="edi_277_imports",
+        null=True,
+        blank=True,
+    )
+    acknowledgement = models.ForeignKey(
+        EDIAcknowledgement,
+        on_delete=models.SET_NULL,
+        related_name="import_277_rows",
+        null=True,
+        blank=True,
+    )
+    filename = models.CharField(max_length=255)
+    remote_path = models.CharField(max_length=1024)
+    file_hash = models.CharField(max_length=128, null=True, blank=True)
+    status = models.CharField(
+        max_length=32,
+        choices=EDI999ImportStatus.choices,
+        default=EDI999ImportStatus.DISCOVERED,
+    )
+    attempt = models.PositiveIntegerField(default=0)
+    celery_task_id = models.CharField(max_length=255, null=True, blank=True)
+    message = models.CharField(max_length=500, null=True, blank=True)
+    detail = models.TextField(null=True, blank=True)
+    started_at = models.DateTimeField(null=True, blank=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+    is_active = models.BooleanField(default=True)
+
+    objects = EDI277ImportQuerySet.as_manager()
+
+    class Meta:
+        verbose_name = "EDI 277 Import"
+        verbose_name_plural = "EDI 277 Imports"
+        ordering = ("-id",)
+        constraints = [
+            models.UniqueConstraint(
+                fields=["credentials", "remote_path"],
+                condition=models.Q(
+                    credentials__isnull=False,
+                    remote_path__isnull=False,
+                    is_active=True,
+                ),
+                name="uniq_active_edi_277_import_remote_path",
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=["status", "is_active"],
+                name="edi_277_imp_status_active_idx",
+            ),
+            models.Index(
+                fields=["file_hash"],
+                name="edi_277_imp_hash_idx",
+            ),
+            models.Index(
+                fields=["filename"],
+                name="edi_277_imp_filename_idx",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.filename} {self.status} #{self.pk}"
+
+
 class EDI835ImportQuerySet(models.QuerySet):
     def with_relations(self):
         return self.select_related(
