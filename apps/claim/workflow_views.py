@@ -17,12 +17,14 @@ from apps.claim.serializers import (
     AttachmentDashboardSerializer,
     AttachmentSubmissionIdSerializer,
     AttachmentSubmissionSerializer,
+    BulkAttachmentReviewSerializer,
     ClaimDocumentIdSerializer,
     ClaimDocumentUploadSerializer,
     SubmitAttachmentSerializer,
 )
 from apps.claim.utils.attachment_service import (
     build_attachment_dashboard,
+    bulk_review_attachments,
     list_attachment_queue,
     submit_claim_attachments,
     upsert_claim_document_from_upload,
@@ -141,6 +143,8 @@ class ClaimDocumentUploadAPIView(APIView):
                 file_size=stored["file_size"],
                 is_signed=serializer.validated_data.get("is_signed", False),
                 status=serializer.validated_data.get("status"),
+                service_date=serializer.validated_data.get("service_date"),
+                verification_date=serializer.validated_data.get("verification_date"),
             )
             logger.info("Uploaded claim document id=%s claim_id=%s", doc.id, claim.id)
             return success_response(
@@ -252,5 +256,31 @@ class AttachmentSubmissionSubmitAPIView(APIView):
             logger.error("Attachment submit failed:\n%s", traceback.format_exc())
             return error_response(
                 "Unable to submit attachments.",
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+
+class AttachmentBulkReviewAPIView(APIView):
+    """Batch confirm, fail, or submit attachments for multiple claims."""
+
+    @extend_schema(
+        tags=["attachment_submission"],
+        request=BulkAttachmentReviewSerializer,
+        responses={200: dict},
+    )
+    def post(self, request):
+        try:
+            serializer = BulkAttachmentReviewSerializer(data=request.data)
+            if not serializer.is_valid():
+                return error_response("Validation failed.", errors=serializer.errors)
+            result = bulk_review_attachments(serializer.validated_data["items"])
+            return success_response(
+                "Bulk attachment review completed.",
+                data=result,
+            )
+        except Exception:
+            logger.error("Bulk attachment review failed:\n%s", traceback.format_exc())
+            return error_response(
+                "Unable to process bulk attachment review.",
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )

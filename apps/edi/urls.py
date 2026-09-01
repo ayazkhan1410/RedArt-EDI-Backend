@@ -12,6 +12,11 @@ from apps.edi.import_835_views import (
     EDI835ImportPollAPIView,
 )
 from apps.edi.import_277_views import EDIAcknowledgementImport277APIView
+from apps.edi.import_277_poll_views import (
+    EDI277ImportDetailAPIView,
+    EDI277ImportListAPIView,
+    EDI277ImportPollAPIView,
+)
 from apps.edi.import_999_views import (
     EDI999ImportDetailAPIView,
     EDI999ImportListAPIView,
@@ -122,6 +127,21 @@ urlpatterns = [
         "edi-acknowledgements/import-277/",
         EDIAcknowledgementImport277APIView.as_view(),
         name="edi-acknowledgement-import-277",
+    ),
+    path(
+        "edi-277-imports/",
+        EDI277ImportListAPIView.as_view(),
+        name="edi-277-import-list",
+    ),
+    path(
+        "edi-277-imports/poll/",
+        EDI277ImportPollAPIView.as_view(),
+        name="edi-277-import-poll",
+    ),
+    path(
+        "edi-277-imports/<int:pk>/",
+        EDI277ImportDetailAPIView.as_view(),
+        name="edi-277-import-detail",
     ),
     path(
         "edi-validation-reports/",

@@ -8,6 +8,7 @@ from apps.edi.choices import (
     TransactionType,
 )
 from apps.edi.models import (
+    EDI277Import,
     EDI999Import,
     EDI835ClaimPayment,
     EDI835Import,
@@ -557,6 +558,65 @@ class PollEDI999ImportsSerializer(serializers.Serializer):
         default=True,
         help_text="If true, enqueue Celery poll_edi_999_imports; else run discover+queue inline.",
     )
+
+
+class EDI277ImportSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = EDI277Import
+        fields = (
+            "id",
+            "credentials",
+            "directory",
+            "batch",
+            "edi_file",
+            "acknowledgement",
+            "filename",
+            "remote_path",
+            "file_hash",
+            "status",
+            "attempt",
+            "celery_task_id",
+            "message",
+            "started_at",
+            "finished_at",
+            "is_active",
+            "created_at",
+            "updated_at",
+        )
+        read_only_fields = fields
+
+
+class EDI277ImportListSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = EDI277Import
+        fields = (
+            "id",
+            "credentials",
+            "directory",
+            "batch",
+            "edi_file",
+            "acknowledgement",
+            "filename",
+            "remote_path",
+            "file_hash",
+            "status",
+            "attempt",
+            "celery_task_id",
+            "message",
+            "started_at",
+            "finished_at",
+            "is_active",
+            "created_at",
+        )
+        read_only_fields = fields
+
+
+class PollEDI277ImportsSerializer(serializers.Serializer):
+    """Manual trigger for Import 277 SFTP poller."""
+
+    credentials_id = serializers.IntegerField(required=False, allow_null=True)
+    batch_id = serializers.IntegerField(required=False, allow_null=True)
+    async_mode = serializers.BooleanField(required=False, default=True)
 
 
 class Import835RemittanceSerializer(serializers.Serializer):

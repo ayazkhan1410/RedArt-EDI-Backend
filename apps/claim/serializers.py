@@ -237,6 +237,8 @@ class ClaimDocumentSerializer(serializers.ModelSerializer):
             "content_type",
             "file_size",
             "is_signed",
+            "service_date",
+            "verification_date",
             "status",
             "is_active",
             "created_at",
@@ -317,6 +319,8 @@ class ClaimDocumentListSerializer(serializers.ModelSerializer):
             "blob_ref",
             "file_size",
             "is_signed",
+            "service_date",
+            "verification_date",
             "status",
             "is_active",
             "created_at",
@@ -334,6 +338,8 @@ class ClaimDocumentUploadSerializer(serializers.Serializer):
     file = serializers.FileField()
     is_signed = serializers.BooleanField(required=False, default=False)
     status = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    service_date = serializers.DateField(required=False, allow_null=True)
+    verification_date = serializers.DateField(required=False, allow_null=True)
 
     def validate_document_type(self, value):
         value = str(value).strip().upper()
@@ -748,4 +754,30 @@ class LongDistancePilotSerializer(serializers.Serializer):
 
     def validate_attachment_reference(self, value):
         return clean_optional_text(value)
+
+
+class BulkAttachmentReviewItemSerializer(serializers.Serializer):
+    claim_id = serializers.IntegerField()
+    action = serializers.ChoiceField(choices=("SUBMIT", "CONFIRM", "FAIL"))
+    channel = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    submission_reference = serializers.CharField(
+        required=False, allow_blank=True, allow_null=True
+    )
+    submission_id = serializers.IntegerField(required=False, allow_null=True)
+    environment = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    allow_retry = serializers.BooleanField(required=False, default=False)
+    notes = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+
+    def validate_channel(self, value):
+        value = clean_optional_text(value)
+        if value is None:
+            return value
+        value = value.upper()
+        if value not in AttachmentRoute.values or value == AttachmentRoute.NONE:
+            raise serializers.ValidationError("Invalid attachment channel.")
+        return value
+
+
+class BulkAttachmentReviewSerializer(serializers.Serializer):
+    items = BulkAttachmentReviewItemSerializer(many=True, allow_empty=False)
 

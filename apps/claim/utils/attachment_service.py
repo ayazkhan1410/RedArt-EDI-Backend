@@ -317,6 +317,8 @@ def upsert_claim_document_from_upload(
     file_size: int,
     is_signed: bool = False,
     status: str | None = None,
+    service_date=None,
+    verification_date=None,
 ) -> ClaimDocument:
     """Create or replace the active document row for a claim document type."""
     status = status or DocumentStatus.COMPLETE
@@ -334,6 +336,8 @@ def upsert_claim_document_from_upload(
         existing.file_size = file_size
         existing.is_signed = is_signed
         existing.status = status
+        existing.service_date = service_date
+        existing.verification_date = verification_date
         existing.save(
             update_fields=[
                 "file_name",
@@ -343,6 +347,8 @@ def upsert_claim_document_from_upload(
                 "file_size",
                 "is_signed",
                 "status",
+                "service_date",
+                "verification_date",
                 "updated_at",
             ]
         )
@@ -358,8 +364,161 @@ def upsert_claim_document_from_upload(
             file_size=file_size,
             is_signed=is_signed,
             status=status,
+            service_date=service_date,
+            verification_date=verification_date,
             is_active=True,
         )
 
     sync_claim_document_status(claim)
     return doc
+
+
+@transaction.atomic
+def confirm_attachment_submission(
+    claim_id: int,
+    *,
+    submission_id: int | None = None,
+    submission_reference: str | None = None,
+) -> AttachmentSubmission:
+    claim = Claim.objects.select_for_update().filter(pk=claim_id, is_active=True).first()
+    if claim is None:
+        raise ValueError("Claim not found or inactive.")
+
+    qs = AttachmentSubmission.objects.filter(claim_id=claim.id, is_active=True)
+    if submission_id:
+        submission = qs.filter(pk=submission_id).first()
+    else:
+        submission = qs.filter(
+            status__in=(
+                AttachmentSubmissionStatus.SUBMITTED,
+                AttachmentSubmissionStatus.QUEUED,
+            )
+        ).order_by("-id").first()
+
+    if submission is None:
+        raise ValueError("No active attachment submission found to confirm.")
+
+    if submission_reference:
+        submission.submission_reference = submission_reference.strip()
+    submission.status = AttachmentSubmissionStatus.CONFIRMED
+    if submission.submitted_at is None:
+        submission.submitted_at = timezone.now()
+    submission.confirmed_at = timezone.now()
+    submission.save(
+        update_fields=[
+            "submission_reference",
+            "status",
+            "submitted_at",
+            "confirmed_at",
+            "updated_at",
+        ]
+    )
+    sync_claim_from_attachment_submission(submission)
+    return submission
+
+
+@transaction.atomic
+def fail_attachment_submission(
+    claim_id: int,
+    *,
+    submission_id: int | None = None,
+    notes: str | None = None,
+) -> AttachmentSubmission:
+    claim = Claim.objects.select_for_update().filter(pk=claim_id, is_active=True).first()
+    if claim is None:
+        raise ValueError("Claim not found or inactive.")
+
+    qs = AttachmentSubmission.objects.filter(claim_id=claim.id, is_active=True)
+    if submission_id:
+        submission = qs.filter(pk=submission_id).first()
+    else:
+        submission = qs.exclude(status=AttachmentSubmissionStatus.CONFIRMED).order_by(
+            "-id"
+        ).first()
+
+    if submission is None:
+        raise ValueError("No active attachment submission found to fail.")
+
+    submission.status = AttachmentSubmissionStatus.FAILED
+    if notes:
+        submission.notes = notes[:500]
+    submission.save(update_fields=["status", "notes", "updated_at"])
+    sync_claim_from_attachment_submission(submission)
+    return submission
+
+
+def bulk_review_attachments(items: list[dict]) -> dict:
+    """
+    Process a batch of attachment review actions for RedArt ops.
+    Each item: {claim_id, action, channel?, submission_reference?, environment?, notes?}
+    action: SUBMIT | CONFIRM | FAIL
+    """
+    results = []
+    success_count = 0
+    error_count = 0
+
+    for item in items:
+        claim_id = item.get("claim_id")
+        action = (item.get("action") or "").strip().upper()
+        row = {"claim_id": claim_id, "action": action}
+
+        try:
+            if not claim_id:
+                raise ValueError("claim_id is required.")
+            if action == "SUBMIT":
+                submission = submit_claim_attachments(
+                    int(claim_id),
+                    channel=item.get("channel"),
+                    submission_reference=item.get("submission_reference"),
+                    environment=item.get("environment"),
+                    allow_retry=item.get("allow_retry", False),
+                )
+                row.update(
+                    {
+                        "success": True,
+                        "submission_id": submission.id,
+                        "status": submission.status,
+                    }
+                )
+            elif action == "CONFIRM":
+                submission = confirm_attachment_submission(
+                    int(claim_id),
+                    submission_id=item.get("submission_id"),
+                    submission_reference=item.get("submission_reference"),
+                )
+                row.update(
+                    {
+                        "success": True,
+                        "submission_id": submission.id,
+                        "status": submission.status,
+                    }
+                )
+            elif action == "FAIL":
+                submission = fail_attachment_submission(
+                    int(claim_id),
+                    submission_id=item.get("submission_id"),
+                    notes=item.get("notes"),
+                )
+                row.update(
+                    {
+                        "success": True,
+                        "submission_id": submission.id,
+                        "status": submission.status,
+                    }
+                )
+            else:
+                raise ValueError(
+                    "action must be SUBMIT, CONFIRM, or FAIL."
+                )
+            success_count += 1
+        except Exception as exc:
+            error_count += 1
+            row.update({"success": False, "error": str(exc)[:500]})
+        results.append(row)
+
+    return {
+        "total": len(items),
+        "success_count": success_count,
+        "error_count": error_count,
+        "results": results,
+    }

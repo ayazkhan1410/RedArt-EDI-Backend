@@ -1,8 +1,8 @@
 # RedArt EDI — Progress Report
 
 **Branch:** `Ayaz/local-main`  
-**Date:** 2026-08-31  
-**Role:** Standalone EDI API service (not copied into RedArt). RedArt backend calls this service.
+**Date:** 2026-09-01  
+**Role:** Standalone EDI API service. RedArt backend calls this service.
 
 **Flow:** `RedArt UI → RedArt backend → EDI API (/api/v1) → HCPF MFT/SFTP`
 
@@ -14,48 +14,63 @@
 |------|--------|
 | Provider / patient / trip / claim / service lines / documents / batches | Done |
 | Long-distance document gate (25+ / 52–125) | Done |
-| `POST /claims/{id}/validate/` → `{ready, errors[]}` | Done |
-| `GET /claims/{id}/status/` + `GET /submission-batches/{id}/status/` | Done |
-| 837P generate (client-approved sample shape) | Done |
-| Upload to HCPF SFTP + MinIO + transfer logs | Done |
-| 999 import (paste + SFTP poll) / apply (never sets PAID) | Done |
-| 835 remittance import → Claim PAID / DENIED (CLP-driven) | Done |
-| 835 SFTP poll (`edi-835-imports/poll/`) | Done |
-| HCPF designated rural counties seed (125-mile) | Done |
-| 837P readiness hardening (taxonomy, member ID, SV1 POS) | Done |
-| Production HTTPS proxy hardening | Done |
-| JWT auth: `POST /api/v1/auth/token/` (+ refresh/verify) | Done |
-| API service user (`create_api_service_user`, group `edi_api_service`) | Done |
-| Sample curl pack: `docs/REDART_API_SAMPLES.md` | Done |
-| Swagger: `/api/docs/` · versioned `/api/v1/` | Done |
-| HCPF TP enrollment + real MFT key SFTP wired (TEST) | Done |
+| Document blob storage + upload/download APIs | Done |
+| Attachment queue + dashboard + bulk review API | Done |
+| Production MFT attachment adapter (portal + SFTP) | Done |
+| Document `service_date` + `verification_date` fields | Done |
+| `POST /claims/{id}/validate/` + status endpoints | Done |
+| 837P generate + SFTP upload + transfer logs | Done |
+| 999 import (paste + SFTP poll) | Done |
+| 277 import (paste + SFTP poll) | Done |
+| Edifecs validation reports (audit/LDNS XML) | Done |
+| Long-distance pilot API (`POST /pilot/long-distance/`) | Done |
+| 835 remittance import + SFTP poll | Done |
+| JWT auth + API service user | Done |
+| Swagger `/api/docs/` + sample payloads | Done |
+| HCPF TEST SFTP wired | Done |
 
-### What Wahab needs from this service
-1. **API URL** (TEST/deployed host)  
-2. **Auth** — service user credentials (secure channel) → `POST /api/v1/auth/token/` → `Authorization: Bearer <access>`  
-3. **Swagger** — `/api/docs/`  
-4. **Sample payloads** — `docs/REDART_API_SAMPLES.md` + seed (`seed_demo_data --flush-all`)
+### What Wahab needs
+1. **Deployed TEST API URL** (Render or similar)
+2. **Auth** — `POST /api/v1/auth/token/` → Bearer token
+3. **Swagger** — `/api/docs/`
+4. **Sample payloads** — `docs/REDART_API_SAMPLES.md`
 
-Local Docker: `http://127.0.0.1:7000`  
-Enforce auth in Docker/local: `API_REQUIRE_AUTH=true`
+Local Docker: `http://127.0.0.1:7000`
 
 ---
 
-## Remaining
+## Remaining (ops / client)
 
-| # | Item | Owner / note |
-|---|------|----------------|
-| 1 | Deployed TEST API URL (Render account) | Ops |
-| 2 | Confirm HCPF 837P pickup + returned 999 | Ops / wait on HCPF |
-| 3 | HCPF attachment channel answer + live send (PDF steps 6–7) | Client / HCPF |
-| 4 | Long-distance pilot with signed docs (PDF step 8) | Ops |
-
-Core EDI + attachment **rules** are complete; remaining work is deploy + HCPF ops.
+| # | Item | Owner |
+|---|------|-------|
+| 1 | Deploy TEST API URL + hand off credentials | Ops |
+| 2 | Confirm live HCPF 837P pickup + 999 + Edifecs reports | Ops / HCPF |
+| 3 | HCPF attachment channel confirmation (if not MFT) | Client / HCPF |
+| 4 | Run long-distance pilot against HCPF TEST with signed docs | Ops |
 
 ---
 
-## Not remaining (architecture already correct)
+## Key endpoints (integration)
 
-- RedArt does **not** embed this codebase  
-- RedArt does **not** generate X12 or hold SFTP keys  
-- This service is the EDI engine behind RedArt’s backend  
+| Step | Endpoint |
+|------|----------|
+| Upload docs | `POST /api/v1/claim-documents/upload/` |
+| Bulk attachment ops | `POST /api/v1/attachment-submissions/bulk-review/` |
+| LD pilot | `POST /api/v1/pilot/long-distance/` |
+| Import 999 | `POST /api/v1/edi-acknowledgements/import-999/` or `edi-999-imports/poll/` |
+| Import 277 | `POST /api/v1/edi-acknowledgements/import-277/` or `edi-277-imports/poll/` |
+| Validation reports | `POST /api/v1/edi-validation-reports/import/` |
+
+Production attachment settings (when `ATTACHMENT_PRODUCTION_MODE=true`):
+
+- `ATTACHMENT_MFT_ENABLED=true`
+- `ATTACHMENT_PRODUCTION_DEFAULT_CHANNEL=HCPF_APPROVED_CHANNEL`
+- `ATTACHMENT_MFT_REMOTE_PATH_TEMPLATE={claim_number}/{document_type}/{filename}`
+- Active `OUTBOUND_ATTACHMENT` SFTP directory for `PRODUCTION`
+
+---
+
+## Not in this repo
+
+- RedArt frontend (`RedArt-EDI-Frontend`)
+- RedArt-side API client (Wahab integrates from RedArt backend)

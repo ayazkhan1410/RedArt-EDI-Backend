@@ -138,6 +138,16 @@ class ClaimDocument(BaseModel):
     content_type = models.CharField(max_length=128, null=True, blank=True)
     file_size = models.PositiveIntegerField(null=True, blank=True)
     is_signed = models.BooleanField(default=False)
+    service_date = models.DateField(
+        null=True,
+        blank=True,
+        help_text="Trip/service date shown on the standard trip log.",
+    )
+    verification_date = models.DateField(
+        null=True,
+        blank=True,
+        help_text="Verification date on the 25+ mile verification form.",
+    )
     status = models.CharField(
         max_length=32,
         choices=DocumentStatus.choices,

@@ -567,6 +567,7 @@ def sync_claim_from_attachment_submission(submission):
             ClaimStatus.ATTACHMENT_SUBMITTED,
             ClaimStatus.DOCUMENTS_COMPLETE,
             ClaimStatus.DOCUMENTS_REQUIRED,
+            ClaimStatus.READY_FOR_837P,
         ):
             claim.status = ClaimStatus.ATTACHMENT_CONFIRMED
             update_fields.append("status")
@@ -579,6 +580,7 @@ def sync_claim_from_attachment_submission(submission):
             ClaimStatus.ATTACHMENT_REQUIRED,
             ClaimStatus.ATTACHMENT_QUEUED,
             ClaimStatus.DOCUMENTS_COMPLETE,
+            ClaimStatus.READY_FOR_837P,
         ):
             claim.status = ClaimStatus.ATTACHMENT_SUBMITTED
             update_fields.append("status")
