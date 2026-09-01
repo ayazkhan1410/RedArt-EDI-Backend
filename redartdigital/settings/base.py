@@ -336,6 +336,25 @@ EDI_SFTP_REQUIRE_HOST_FINGERPRINT = env.bool(
     "EDI_SFTP_REQUIRE_HOST_FINGERPRINT", default=False
 )
 
+# Claim document blob storage (MinIO/S3 primary; local MEDIA fallback).
+CLAIM_DOCUMENT_MAX_BYTES = env.int("CLAIM_DOCUMENT_MAX_BYTES", default=10 * 1024 * 1024)
+CLAIM_DOCUMENT_ALLOWED_CONTENT_TYPES = tuple(
+    env.list(
+        "CLAIM_DOCUMENT_ALLOWED_CONTENT_TYPES",
+        default=[
+            "application/pdf",
+            "image/jpeg",
+            "image/png",
+            "image/webp",
+        ],
+    )
+)
+ATTACHMENT_ADAPTER_DEFAULT = env(
+    "ATTACHMENT_ADAPTER_DEFAULT", default="HCPF_PORTAL"
+)
+ATTACHMENT_MFT_ENABLED = env.bool("ATTACHMENT_MFT_ENABLED", default=False)
+ATTACHMENT_MFT_ENVIRONMENT = env("ATTACHMENT_MFT_ENVIRONMENT", default="TEST")
+
 # Optional seed for real/test SFTP (never commit secrets — put in .env)
 SFTP_SEED_NAME = env("SFTP_SEED_NAME", default="SEED-SFTP-CLOUD")
 SFTP_SEED_HOST = env("SFTP_SEED_HOST", default="")

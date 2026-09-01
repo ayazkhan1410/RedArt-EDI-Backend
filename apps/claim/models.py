@@ -134,6 +134,9 @@ class ClaimDocument(BaseModel):
     )
     file_name = models.CharField(max_length=255, null=True, blank=True)
     document_hash = models.CharField(max_length=128, null=True, blank=True)
+    blob_ref = models.CharField(max_length=1024, null=True, blank=True)
+    content_type = models.CharField(max_length=128, null=True, blank=True)
+    file_size = models.PositiveIntegerField(null=True, blank=True)
     is_signed = models.BooleanField(default=False)
     status = models.CharField(
         max_length=32,
@@ -325,6 +328,9 @@ class AttachmentSubmission(BaseModel):
         blank=True,
     )
     submission_reference = models.CharField(max_length=128, null=True, blank=True)
+    payload_hash = models.CharField(max_length=128, null=True, blank=True)
+    remote_path = models.CharField(max_length=1024, null=True, blank=True)
+    retry_count = models.PositiveIntegerField(default=0, null=True, blank=True)
     status = models.CharField(
         max_length=32,
         choices=AttachmentSubmissionStatus.choices,
@@ -351,6 +357,25 @@ class AttachmentSubmission(BaseModel):
             models.Index(
                 fields=["status", "is_active"],
                 name="attach_sub_status_active_idx",
+            ),
+            models.Index(
+                fields=["claim", "payload_hash"],
+                name="attach_sub_claim_payload_idx",
+            ),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["claim", "payload_hash"],
+                condition=models.Q(
+                    is_active=True,
+                    payload_hash__isnull=False,
+                    status__in=(
+                        AttachmentSubmissionStatus.QUEUED,
+                        AttachmentSubmissionStatus.SUBMITTED,
+                        AttachmentSubmissionStatus.CONFIRMED,
+                    ),
+                ),
+                name="uniq_active_attachment_payload_hash",
             ),
         ]
 

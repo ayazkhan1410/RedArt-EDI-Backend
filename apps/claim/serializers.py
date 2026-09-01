@@ -233,13 +233,23 @@ class ClaimDocumentSerializer(serializers.ModelSerializer):
             "document_type",
             "file_name",
             "document_hash",
+            "blob_ref",
+            "content_type",
+            "file_size",
             "is_signed",
             "status",
             "is_active",
             "created_at",
             "updated_at",
         )
-        read_only_fields = ("id", "created_at", "updated_at")
+        read_only_fields = (
+            "id",
+            "blob_ref",
+            "content_type",
+            "file_size",
+            "created_at",
+            "updated_at",
+        )
 
     def validate_document_type(self, value):
         if value in (None, ""):
@@ -303,6 +313,9 @@ class ClaimDocumentListSerializer(serializers.ModelSerializer):
             "claim",
             "document_type",
             "file_name",
+            "document_hash",
+            "blob_ref",
+            "file_size",
             "is_signed",
             "status",
             "is_active",
@@ -313,6 +326,76 @@ class ClaimDocumentListSerializer(serializers.ModelSerializer):
 
 class ClaimDocumentIdSerializer(serializers.Serializer):
     id = serializers.IntegerField(read_only=True)
+
+
+class ClaimDocumentUploadSerializer(serializers.Serializer):
+    claim = serializers.IntegerField()
+    document_type = serializers.CharField()
+    file = serializers.FileField()
+    is_signed = serializers.BooleanField(required=False, default=False)
+    status = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+
+    def validate_document_type(self, value):
+        value = str(value).strip().upper()
+        if value not in DocumentType.values:
+            raise serializers.ValidationError("Invalid document_type.")
+        return value
+
+    def validate_status(self, value):
+        if value in (None, ""):
+            return DocumentStatus.COMPLETE
+        value = str(value).strip().upper()
+        if value not in DocumentStatus.values:
+            raise serializers.ValidationError("Invalid document status.")
+        return value
+
+
+class AttachmentDashboardSerializer(serializers.Serializer):
+    long_distance_claims = serializers.IntegerField()
+    ready_with_documents = serializers.IntegerField()
+    documents_complete = serializers.IntegerField()
+    missing_verification = serializers.IntegerField()
+    missing_trip_log = serializers.IntegerField()
+    missing_signature = serializers.IntegerField()
+    submitted = serializers.IntegerField()
+    awaiting_confirmation = serializers.IntegerField()
+    confirmed = serializers.IntegerField()
+    failed = serializers.IntegerField()
+    blocked_from_batch = serializers.IntegerField()
+    attachment_submissions_by_status = serializers.DictField(
+        child=serializers.IntegerField()
+    )
+
+
+class SubmitAttachmentSerializer(serializers.Serializer):
+    claim_id = serializers.IntegerField()
+    channel = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    submission_reference = serializers.CharField(
+        required=False, allow_blank=True, allow_null=True
+    )
+    environment = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    allow_retry = serializers.BooleanField(required=False, default=False)
+
+    def validate_channel(self, value):
+        value = clean_optional_text(value)
+        if value is None:
+            return value
+        value = value.upper()
+        if value not in AttachmentRoute.values or value == AttachmentRoute.NONE:
+            raise serializers.ValidationError("Invalid attachment channel.")
+        return value
+
+    def validate_environment(self, value):
+        value = clean_optional_text(value)
+        if value is None:
+            return value
+        value = value.upper()
+        if value not in Environment.values:
+            raise serializers.ValidationError("Invalid environment.")
+        return value
+
+    def validate_submission_reference(self, value):
+        return clean_optional_text(value)
 
 
 class SubmissionBatchSerializer(serializers.ModelSerializer):
@@ -511,6 +594,9 @@ class AttachmentSubmissionSerializer(serializers.ModelSerializer):
             "claim",
             "channel",
             "submission_reference",
+            "payload_hash",
+            "remote_path",
+            "retry_count",
             "status",
             "submitted_at",
             "confirmed_at",
@@ -519,7 +605,14 @@ class AttachmentSubmissionSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
         )
-        read_only_fields = ("id", "created_at", "updated_at")
+        read_only_fields = (
+            "id",
+            "payload_hash",
+            "remote_path",
+            "retry_count",
+            "created_at",
+            "updated_at",
+        )
 
     def validate_channel(self, value):
         if value in (None, ""):
@@ -558,6 +651,36 @@ class AttachmentSubmissionSerializer(serializers.ModelSerializer):
             )
         return value
 
+    def validate(self, attrs):
+        from apps.claim.utils.attachment_service import (
+            ACTIVE_TRANSMISSION_STATUSES,
+            assert_no_duplicate_attachment_submission,
+            compute_claim_document_payload_hash,
+        )
+
+        claim = attrs.get("claim", getattr(self.instance, "claim", None))
+        status = attrs.get("status", getattr(self.instance, "status", None))
+        if claim and status in ACTIVE_TRANSMISSION_STATUSES:
+            payload_hash = compute_claim_document_payload_hash(claim.id)
+            if payload_hash:
+                attrs["payload_hash"] = payload_hash
+                if self.instance is None:
+                    try:
+                        assert_no_duplicate_attachment_submission(
+                            claim.id, payload_hash
+                        )
+                    except ValueError as exc:
+                        raise serializers.ValidationError({"claim": [str(exc)]})
+        return attrs
+
+    def create(self, validated_data):
+        from apps.claim.utils.attachment_service import compute_claim_document_payload_hash
+
+        claim = validated_data.get("claim")
+        if claim and not validated_data.get("payload_hash"):
+            validated_data["payload_hash"] = compute_claim_document_payload_hash(claim.id)
+        return super().create(validated_data)
+
 
 class AttachmentSubmissionListSerializer(serializers.ModelSerializer):
     claim_number = serializers.SerializerMethodField()
@@ -570,6 +693,8 @@ class AttachmentSubmissionListSerializer(serializers.ModelSerializer):
             "claim_number",
             "channel",
             "submission_reference",
+            "payload_hash",
+            "remote_path",
             "status",
             "submitted_at",
             "confirmed_at",

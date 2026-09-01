@@ -21,6 +21,13 @@ from apps.claim.status_views import (
     ClaimValidateAPIView,
     SubmissionBatchStatusAPIView,
 )
+from apps.claim.workflow_views import (
+    AttachmentSubmissionSubmitAPIView,
+    ClaimAttachmentDashboardAPIView,
+    ClaimAttachmentQueueAPIView,
+    ClaimDocumentFileAPIView,
+    ClaimDocumentUploadAPIView,
+)
 from apps.claim.views import (
     ClaimDetailAPIView,
     ClaimFromTripAPIView,
@@ -29,6 +36,16 @@ from apps.claim.views import (
 
 urlpatterns = [
     path("claims/", ClaimListCreateAPIView.as_view(), name="claim-list-create"),
+    path(
+        "claims/attachment-queue/",
+        ClaimAttachmentQueueAPIView.as_view(),
+        name="claim-attachment-queue",
+    ),
+    path(
+        "claims/attachment-dashboard/",
+        ClaimAttachmentDashboardAPIView.as_view(),
+        name="claim-attachment-dashboard",
+    ),
     path(
         "claims/from-trip/",
         ClaimFromTripAPIView.as_view(),
@@ -51,6 +68,16 @@ urlpatterns = [
     ),
     path("claims/<int:pk>/", ClaimDetailAPIView.as_view(), name="claim-detail"),
     path(
+        "claim-documents/upload/",
+        ClaimDocumentUploadAPIView.as_view(),
+        name="claim-document-upload",
+    ),
+    path(
+        "claim-documents/<int:pk>/file/",
+        ClaimDocumentFileAPIView.as_view(),
+        name="claim-document-file",
+    ),
+    path(
         "claim-documents/",
         ClaimDocumentListCreateAPIView.as_view(),
         name="claim-document-list-create",
@@ -59,6 +86,11 @@ urlpatterns = [
         "claim-documents/<int:pk>/",
         ClaimDocumentDetailAPIView.as_view(),
         name="claim-document-detail",
+    ),
+    path(
+        "attachment-submissions/submit/",
+        AttachmentSubmissionSubmitAPIView.as_view(),
+        name="attachment-submission-submit",
     ),
     path(
         "attachment-submissions/",
