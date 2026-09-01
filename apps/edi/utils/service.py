@@ -348,13 +348,42 @@ def apply_edi_acknowledgement(
             .first()
         )
 
+    ref_key = (raw_file_ref or "").strip() or None
+    existing_ack = None
+    if ref_key:
+        existing_ack = (
+            EDIAcknowledgement.objects.filter(
+                batch_id=batch.id,
+                ack_type=ack_type,
+                affected_st02=st02,
+                raw_file_ref=ref_key,
+                is_active=True,
+            )
+            .order_by("-id")
+            .first()
+        )
+    if existing_ack is None and st02:
+        existing_ack = (
+            EDIAcknowledgement.objects.filter(
+                batch_id=batch.id,
+                ack_type=ack_type,
+                affected_st02=st02,
+                is_active=True,
+            )
+            .order_by("-id")
+            .first()
+        )
+
+    if existing_ack is not None:
+        return existing_ack, []
+
     ack = EDIAcknowledgement.objects.create(
         batch=batch,
         edi_file=edi_file,
         ack_type=ack_type,
         status=status,
         affected_st02=st02,
-        raw_file_ref=(raw_file_ref or "").strip() or None,
+        raw_file_ref=ref_key,
         message=(message or "").strip() or None,
         acknowledged_at=when,
         is_active=True,

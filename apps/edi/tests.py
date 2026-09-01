@@ -93,6 +93,7 @@ class EDIFixturesMixin:
                 document_type=doc_type,
                 file_name=name,
                 document_hash=digest,
+                blob_ref=f"claim-documents/{self.claim.id}/{doc_type}/{name}",
                 is_signed=True,
                 status=DocumentStatus.COMPLETE,
             )
@@ -425,6 +426,7 @@ class EDIAcknowledgementAPITests(EDIFixturesMixin, AuthAPITestCase):
                 "edi_file_id": edi.id,
                 "raw_file_ref": "s3://edi/999_001.edi",
                 "content": content,
+                "apply_claim_status": True,
             },
             format="json",
         )

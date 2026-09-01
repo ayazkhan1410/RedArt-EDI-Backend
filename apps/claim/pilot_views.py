@@ -9,6 +9,7 @@ from rest_framework.views import APIView
 
 from apps.claim.serializers import LongDistancePilotSerializer
 from apps.claim.utils.pilot_service import run_long_distance_pilot
+from apps.core.permissions import CanImportEDI, CanOrchestrateEDI
 from apps.core.soft_delete import client_error_message
 from apps.core.utils.responses import error_response, success_response
 
@@ -22,6 +23,8 @@ class LongDistancePilotAPIView(APIView):
     Run Step-8 long-distance flow: attachments → batch → 837P → optional upload.
     RedArt backend calls this instead of chaining many endpoints manually.
     """
+
+    permission_classes = [CanOrchestrateEDI]
 
     @extend_schema(
         tags=[TAG],

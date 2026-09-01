@@ -16,6 +16,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.core.soft_delete import (
+    filter_active_for_list,
     client_error_message,
     get_active_object_or_404,
     get_api_object_or_404,
@@ -97,12 +98,7 @@ class ProviderBillingProfileListCreateAPIView(APIView):
         try:
             profiles = ProviderBillingProfile.objects.all().order_by("-id")
 
-            if request.query_params.get("include_inactive", "").lower() not in (
-                "1",
-                "true",
-                "yes",
-            ):
-                profiles = profiles.filter(is_active=True)
+            profiles = filter_active_for_list(request, profiles)
 
             state = request.query_params.get("state", "").strip()
             if state:

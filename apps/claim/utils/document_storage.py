@@ -62,6 +62,41 @@ def validate_upload_payload(
     return ctype
 
 
+def _reject_unsafe_blob_ref(ref: str) -> str:
+    cleaned = (ref or "").strip().replace("\\", "/")
+    if not cleaned:
+        raise ValueError("Document has no stored file reference.")
+    if cleaned.startswith("/") or "://" in cleaned:
+        raise ValueError("Invalid blob reference path.")
+    parts = [p for p in cleaned.split("/") if p]
+    if any(p == ".." for p in parts):
+        raise ValueError("Invalid blob reference path.")
+    return cleaned
+
+
+def _resolve_media_path(ref: str) -> Path:
+    ref = _reject_unsafe_blob_ref(ref)
+    media_root = Path(settings.MEDIA_ROOT).resolve()
+    path = (media_root / ref).resolve()
+    if media_root not in path.parents and path != media_root:
+        raise ValueError("Invalid blob reference path.")
+    return path
+
+
+def _read_bytes_with_limit(stream, max_bytes: int) -> bytes:
+    chunks = []
+    total = 0
+    while True:
+        chunk = stream.read(min(65536, max_bytes - total + 1))
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > max_bytes:
+            raise ValueError(f"File exceeds maximum size of {max_bytes} bytes.")
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
 def upload_claim_document_bytes(
     *,
     claim_id: int,
@@ -112,9 +147,8 @@ def upload_claim_document_bytes(
 
 def download_claim_document_bytes(blob_ref: str) -> tuple[bytes, str]:
     """Return (bytes, content_type) for a stored document reference."""
-    ref = (blob_ref or "").strip()
-    if not ref:
-        raise ValueError("Document has no stored file reference.")
+    ref = _reject_unsafe_blob_ref(blob_ref)
+    max_bytes = max_claim_document_bytes()
 
     if ref.startswith("s3://"):
         without = ref[len("s3://") :]
@@ -122,15 +156,19 @@ def download_claim_document_bytes(blob_ref: str) -> tuple[bytes, str]:
         from apps.edi.utils.s3_client import get_s3_client
 
         client = get_s3_client()
+        head = client.head_object(Bucket=bucket, Key=key)
+        content_length = head.get("ContentLength")
+        if content_length is not None and content_length > max_bytes:
+            raise ValueError(f"File exceeds maximum size of {max_bytes} bytes.")
         obj = client.get_object(Bucket=bucket, Key=key)
-        body = obj["Body"].read()
+        body = _read_bytes_with_limit(obj["Body"], max_bytes)
         ctype = obj.get("ContentType") or "application/octet-stream"
         return body, ctype
 
-    if "://" in ref:
-        raise ValueError(f"Unsupported blob reference scheme: {ref}")
-
-    path = Path(settings.MEDIA_ROOT) / ref
+    path = _resolve_media_path(ref)
     if not path.is_file():
         raise ValueError("Stored document file not found.")
+    size = path.stat().st_size
+    if size > max_bytes:
+        raise ValueError(f"File exceeds maximum size of {max_bytes} bytes.")
     return path.read_bytes(), "application/octet-stream"

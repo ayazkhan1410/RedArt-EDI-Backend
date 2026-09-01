@@ -16,6 +16,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.core.soft_delete import (
+    filter_active_for_list,
     client_error_message,
     get_active_object_or_404,
     get_api_object_or_404,
@@ -96,12 +97,7 @@ class SFTPCredentialsListCreateAPIView(APIView):
     def get(self, request):
         try:
             rows = SFTPCredentials.objects.with_relations().order_by("-id")
-            if request.query_params.get("include_inactive", "").lower() not in (
-                "1",
-                "true",
-                "yes",
-            ):
-                rows = rows.filter(is_active=True)
+            rows = filter_active_for_list(request, rows)
 
             environment = request.query_params.get("environment", "").strip()
             if environment:
@@ -342,12 +338,7 @@ class SFTPDirectoryListCreateAPIView(APIView):
     def get(self, request):
         try:
             rows = SFTPDirectory.objects.with_relations().order_by("-id")
-            if request.query_params.get("include_inactive", "").lower() not in (
-                "1",
-                "true",
-                "yes",
-            ):
-                rows = rows.filter(is_active=True)
+            rows = filter_active_for_list(request, rows)
 
             cred_id = parse_optional_int(
                 request.query_params.get("credentials_id"), "credentials_id"

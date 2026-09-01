@@ -16,6 +16,11 @@ CORS_ALLOW_ALL_ORIGINS = env.bool("CORS_ALLOW_ALL_ORIGINS", default=False)
 
 EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
 
+# Local Docker SFTP often has no host-key fingerprint configured.
+EDI_SFTP_REQUIRE_HOST_FINGERPRINT = env.bool(
+    "EDI_SFTP_REQUIRE_HOST_FINGERPRINT", default=False
+)
+
 # Prefer authenticated local APIs. Set API_REQUIRE_AUTH=false only for open Swagger demos.
 if env.bool("API_REQUIRE_AUTH", default=True):
     REST_FRAMEWORK = {

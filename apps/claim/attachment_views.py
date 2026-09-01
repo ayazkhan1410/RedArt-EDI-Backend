@@ -1,7 +1,7 @@
 import logging
 import traceback
 
-from django.db import IntegrityError
+from django.db import IntegrityError, transaction
 from django.db.models import Q
 from django.http import Http404
 from django.utils import timezone
@@ -17,6 +17,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.core.soft_delete import (
+    filter_active_for_list,
     client_error_message,
     get_active_object_or_404,
     get_api_object_or_404,
@@ -80,12 +81,7 @@ class AttachmentSubmissionListCreateAPIView(APIView):
         try:
             rows = AttachmentSubmission.objects.with_relations().order_by("-id")
 
-            if request.query_params.get("include_inactive", "").lower() not in (
-                "1",
-                "true",
-                "yes",
-            ):
-                rows = rows.filter(is_active=True)
+            rows = filter_active_for_list(request, rows)
 
             claim_id = parse_optional_int(
                 request.query_params.get("claim_id"), "claim_id"
@@ -138,24 +134,9 @@ class AttachmentSubmissionListCreateAPIView(APIView):
             serializer = AttachmentSubmissionSerializer(data=request.data)
             if not serializer.is_valid():
                 return error_response("Validation failed.", errors=serializer.errors)
-            row = serializer.save()
-            if (
-                row.status == AttachmentSubmissionStatus.SUBMITTED
-                and row.submitted_at is None
-            ):
-                row.submitted_at = timezone.now()
-                row.save(update_fields=["submitted_at", "updated_at"])
-            if (
-                row.status == AttachmentSubmissionStatus.CONFIRMED
-                and row.confirmed_at is None
-            ):
-                row.confirmed_at = timezone.now()
-                fields = ["confirmed_at", "updated_at"]
-                if row.submitted_at is None:
-                    row.submitted_at = row.confirmed_at
-                    fields.append("submitted_at")
-                row.save(update_fields=fields)
-            sync_claim_from_attachment_submission(row)
+            with transaction.atomic():
+                row = serializer.save()
+                sync_claim_from_attachment_submission(row)
             logger.info("Created attachment submission id=%s", row.id)
             return success_response(
                 "Attachment submission created successfully.",

@@ -44,10 +44,20 @@ if env.bool("EDI_ALLOW_LOVABLE_ORIGINS", default=False):
 CSRF_TRUSTED_ORIGINS = env.list("CSRF_TRUSTED_ORIGINS", default=[])
 
 # Production always requires authentication (JWT Bearer or session).
+# Production profile enforces non-empty ALLOWED_HOSTS and POSTGRES_PASSWORD.
 REST_FRAMEWORK = {
     **REST_FRAMEWORK,
     "DEFAULT_PERMISSION_CLASSES": [
         "rest_framework.permissions.IsAuthenticated",
+    ],
+    "DEFAULT_THROTTLE_RATES": {
+        **(REST_FRAMEWORK.get("DEFAULT_THROTTLE_RATES") or {}),
+        "user": env("API_USER_THROTTLE", default="120/min"),
+        "anon": env("API_ANON_THROTTLE", default="30/min"),
+    },
+    "DEFAULT_THROTTLE_CLASSES": [
+        "rest_framework.throttling.UserRateThrottle",
+        "rest_framework.throttling.AnonRateThrottle",
     ],
 }
 
@@ -60,7 +70,7 @@ DATABASES = {
         "HOST": env("POSTGRES_HOST", default="localhost"),
         "PORT": env("POSTGRES_PORT", default="5432"),
         "CONN_MAX_AGE": env("DJANGO_DB_CONN_MAX_AGE"),
-        "OPTIONS": {"sslmode": env("POSTGRES_SSLMODE", default="prefer")},
+        "OPTIONS": {"sslmode": env("POSTGRES_SSLMODE", default="require")},
     }
 }
 

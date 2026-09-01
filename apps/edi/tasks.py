@@ -9,6 +9,7 @@ from celery.exceptions import MaxRetriesExceededError
 
 from apps.edi.choices import EDI999ImportStatus, EDI835ImportStatus, EDIFileStatus
 from apps.edi.models import EDI277Import, EDI999Import, EDI835Import
+from apps.edi.utils.import_errors import PermanentImportError
 from apps.edi.utils.import_277_poll import (
     process_edi_277_import,
     queue_edi_277_import_poll,
@@ -159,7 +160,6 @@ def process_edi_999_import_task(self, import_id, batch_id=None):
     try:
         EDI999Import.objects.filter(pk=import_id).update(
             celery_task_id=self.request.id,
-            attempt=self.request.retries + 1,
         )
         result = process_edi_999_import(import_id, batch_id=batch_id)
         status_value = result.get("status")
@@ -179,9 +179,27 @@ def process_edi_999_import_task(self, import_id, batch_id=None):
             import_id,
         )
         raise
+    except PermanentImportError as exc:
+        logger.warning(
+            "Celery process_edi_999_import permanent failure id=%s err=%s",
+            import_id,
+            exc,
+        )
+        row = EDI999Import.objects.filter(pk=import_id).first()
+        return {
+            "id": import_id,
+            "status": row.status if row else EDI999ImportStatus.FAILED,
+            "message": str(exc),
+        }
     except Exception as exc:
         row = EDI999Import.objects.filter(pk=import_id).first()
         if row and row.status == EDI999ImportStatus.SKIPPED:
+            return {
+                "id": import_id,
+                "status": row.status,
+                "message": row.message,
+            }
+        if row and row.status == EDI999ImportStatus.FAILED:
             return {
                 "id": import_id,
                 "status": row.status,

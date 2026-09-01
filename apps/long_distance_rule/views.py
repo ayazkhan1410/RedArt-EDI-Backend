@@ -15,6 +15,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.core.soft_delete import (
+    filter_active_for_list,
     client_error_message,
     get_active_object_or_404,
     get_api_object_or_404,
@@ -75,12 +76,7 @@ class LongDistanceRuleListCreateAPIView(APIView):
         try:
             rules = LongDistanceRule.objects.all().order_by("county_type", "id")
 
-            if request.query_params.get("include_inactive", "").lower() not in (
-                "1",
-                "true",
-                "yes",
-            ):
-                rules = rules.filter(is_active=True)
+            rules = filter_active_for_list(request, rules)
 
             county_type = request.query_params.get("county_type", "").strip()
             if county_type:

@@ -16,6 +16,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.core.soft_delete import (
+    filter_active_for_list,
     client_error_message,
     get_active_object_or_404,
     get_api_object_or_404,
@@ -77,12 +78,7 @@ class ClaimServiceLineListCreateAPIView(APIView):
         try:
             lines = ClaimServiceLine.objects.with_relations().order_by("-id")
 
-            if request.query_params.get("include_inactive", "").lower() not in (
-                "1",
-                "true",
-                "yes",
-            ):
-                lines = lines.filter(is_active=True)
+            lines = filter_active_for_list(request, lines)
 
             claim_id = parse_optional_int(
                 request.query_params.get("claim_id"), "claim_id"

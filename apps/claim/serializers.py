@@ -43,7 +43,6 @@ class ClaimSerializer(serializers.ModelSerializer):
             "status",
             "attachment_required",
             "attachment_route",
-            "attachment_status",
             "is_active",
             "created_at",
             "updated_at",
@@ -55,6 +54,7 @@ class ClaimSerializer(serializers.ModelSerializer):
             "provider_id",
             "status",
             "attachment_required",
+            "attachment_route",
             "attachment_status",
             "is_active",
             "created_at",
@@ -124,7 +124,7 @@ class ClaimSerializer(serializers.ModelSerializer):
     def validate(self, attrs):
         trip = attrs.get("trip", getattr(self.instance, "trip", None))
         if trip is not None:
-            qs = Claim.objects.filter(trip_id=trip.pk)
+            qs = Claim.objects.filter(trip_id=trip.pk, is_active=True)
             if self.instance is not None:
                 qs = qs.exclude(pk=self.instance.pk)
             if qs.exists():
@@ -136,7 +136,7 @@ class ClaimSerializer(serializers.ModelSerializer):
             "claim_number", getattr(self.instance, "claim_number", None)
         )
         if claim_number:
-            qs = Claim.objects.filter(claim_number__iexact=claim_number)
+            qs = Claim.objects.filter(claim_number__iexact=claim_number, is_active=True)
             if self.instance is not None:
                 qs = qs.exclude(pk=self.instance.pk)
             if qs.exists():
@@ -148,7 +148,7 @@ class ClaimSerializer(serializers.ModelSerializer):
             "external_id", getattr(self.instance, "external_id", None)
         )
         if external_id:
-            qs = Claim.objects.filter(external_id__iexact=external_id)
+            qs = Claim.objects.filter(external_id__iexact=external_id, is_active=True)
             if self.instance is not None:
                 qs = qs.exclude(pk=self.instance.pk)
             if qs.exists():
@@ -249,6 +249,9 @@ class ClaimDocumentSerializer(serializers.ModelSerializer):
             "blob_ref",
             "content_type",
             "file_size",
+            "status",
+            "is_signed",
+            "is_active",
             "created_at",
             "updated_at",
         )
@@ -429,6 +432,8 @@ class SubmissionBatchSerializer(serializers.ModelSerializer):
             "id",
             "claim_count",
             "total_amount",
+            "status",
+            "is_active",
             "created_at",
             "updated_at",
         )
@@ -616,6 +621,10 @@ class AttachmentSubmissionSerializer(serializers.ModelSerializer):
             "payload_hash",
             "remote_path",
             "retry_count",
+            "status",
+            "submitted_at",
+            "confirmed_at",
+            "is_active",
             "created_at",
             "updated_at",
         )
@@ -779,5 +788,5 @@ class BulkAttachmentReviewItemSerializer(serializers.Serializer):
 
 
 class BulkAttachmentReviewSerializer(serializers.Serializer):
-    items = BulkAttachmentReviewItemSerializer(many=True, allow_empty=False)
+    items = BulkAttachmentReviewItemSerializer(many=True, allow_empty=False, max_length=100)
 

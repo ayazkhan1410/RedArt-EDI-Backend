@@ -54,6 +54,28 @@ def hard_delete_permission_error(request, hard: bool):
     return None
 
 
+def staff_include_inactive(request) -> bool:
+    """include_inactive list param — staff only."""
+    flag = (request.query_params.get("include_inactive") or "").lower()
+    if flag not in ("1", "true", "yes"):
+        return False
+    user = getattr(request, "user", None)
+    return bool(
+        user
+        and user.is_authenticated
+        and (user.is_staff or user.is_superuser)
+    )
+
+
+def filter_active_for_list(request, queryset):
+    """Apply is_active=True unless staff explicitly requests inactive rows."""
+    if staff_include_inactive(request):
+        return queryset
+    if hasattr(queryset.model, "is_active"):
+        return queryset.filter(is_active=True)
+    return queryset
+
+
 def client_error_message(exc, *, fallback: str = "Request failed.", max_length: int = 500) -> str:
     """
     Safe client-facing message from an exception.

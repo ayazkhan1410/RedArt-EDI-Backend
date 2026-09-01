@@ -16,6 +16,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.core.soft_delete import (
+    filter_active_for_list,
     client_error_message,
     get_active_object_or_404,
     get_api_object_or_404,
@@ -88,12 +89,7 @@ class PatientListCreateAPIView(APIView):
         try:
             patients = Patient.objects.all().order_by("-id")
 
-            if request.query_params.get("include_inactive", "").lower() not in (
-                "1",
-                "true",
-                "yes",
-            ):
-                patients = patients.filter(is_active=True)
+            patients = filter_active_for_list(request, patients)
 
             county = request.query_params.get("county", "").strip()
             if county:

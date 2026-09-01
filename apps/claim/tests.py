@@ -1,6 +1,8 @@
 from datetime import date
 from decimal import Decimal
+from unittest.mock import patch
 
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
 from django.urls import reverse
 from rest_framework import status
@@ -183,19 +185,21 @@ class ClaimDocumentAndBatchTests(ClaimFixturesMixin, AuthAPITestCase):
             environment="TEST",
         )
 
-    def _create_doc(self, document_type, file_name, document_hash):
-        url = reverse("claim-document-list-create")
+    @patch("apps.edi.utils.s3_client.upload_bytes_to_s3", return_value="s3://edi-files/x.pdf")
+    def _create_doc(self, document_type, file_name, document_hash, _mock_s3=None):
+        url = reverse("claim-document-upload")
+        upload = SimpleUploadedFile(
+            file_name, b"%PDF-1.4 test", content_type="application/pdf"
+        )
         return self.client.post(
             url,
             {
                 "claim": self.claim.id,
                 "document_type": document_type,
-                "file_name": file_name,
-                "document_hash": document_hash,
+                "file": upload,
                 "is_signed": True,
-                "status": "COMPLETE",
             },
-            format="json",
+            format="multipart",
         )
 
     def test_missing_docs_block_batch_and_keep_documents_required(self):
@@ -278,23 +282,38 @@ class ClaimDocumentAndBatchTests(ClaimFixturesMixin, AuthAPITestCase):
         )
         self.assertEqual(BatchClaim.objects.filter(batch_id=batch_id).count(), 1)
 
-    def test_attachment_submission_confirms_claim_attachment_status(self):
+    @patch("apps.edi.utils.s3_client.upload_bytes_to_s3", return_value="s3://edi-files/x.pdf")
+    def test_attachment_submission_confirms_claim_attachment_status(self, _mock_s3):
         self._create_doc("STANDARD_TRIP_LOG", "trip_log_C001.pdf", "HASH111")
         self._create_doc("MILE_25_VERIFICATION", "verification_C001.pdf", "HASH222")
         self.claim.refresh_from_db()
         self.assertTrue(self.claim.attachment_required)
 
-        response = self.client.post(
-            reverse("attachment-submission-list-create"),
+        submit = self.client.post(
+            reverse("attachment-submission-submit"),
             {
-                "claim": self.claim.id,
+                "claim_id": self.claim.id,
                 "channel": "HCPF_PORTAL",
                 "submission_reference": "HCPF-ATT-789",
-                "status": "CONFIRMED",
             },
             format="json",
         )
-        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(submit.status_code, status.HTTP_201_CREATED)
+
+        confirm = self.client.post(
+            reverse("attachment-submission-bulk-review"),
+            {
+                "items": [
+                    {
+                        "claim_id": self.claim.id,
+                        "action": "CONFIRM",
+                        "submission_reference": "HCPF-ATT-789",
+                    }
+                ]
+            },
+            format="json",
+        )
+        self.assertEqual(confirm.status_code, status.HTTP_200_OK)
         self.claim.refresh_from_db()
         self.assertEqual(self.claim.attachment_status, AttachmentStatus.CONFIRMED)
 

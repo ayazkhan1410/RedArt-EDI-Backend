@@ -16,6 +16,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.core.soft_delete import (
+    filter_active_for_list,
     client_error_message,
     get_active_object_or_404,
     get_api_object_or_404,
@@ -127,12 +128,7 @@ class EDIAcknowledgementListCreateAPIView(APIView):
         try:
             rows = EDIAcknowledgement.objects.with_relations().order_by("-id")
 
-            if request.query_params.get("include_inactive", "").lower() not in (
-                "1",
-                "true",
-                "yes",
-            ):
-                rows = rows.filter(is_active=True)
+            rows = filter_active_for_list(request, rows)
 
             batch_id = _parse_optional_int(
                 request.query_params.get("batch_id"), "batch_id"
