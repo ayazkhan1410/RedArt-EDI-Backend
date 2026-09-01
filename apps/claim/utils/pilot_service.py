@@ -122,6 +122,10 @@ def run_long_distance_pilot(
             edi_file.id,
             async_mode=upload_async,
         )
+        if upload_async:
+            from apps.edi.tasks import upload_edi_file
+
+            upload_edi_file.delay(edi_file.id, attempt)
         upload_info = {
             "attempt": attempt,
             "sftp_transfer_log_id": sftp_log.id,

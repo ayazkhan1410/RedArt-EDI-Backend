@@ -25,6 +25,9 @@ SECRET_KEY = env("DJANGO_SECRET_KEY", default="change-me-in-local-or-production"
 
 DEBUG = env("DJANGO_DEBUG")
 
+DATA_UPLOAD_MAX_MEMORY_SIZE = env.int("DATA_UPLOAD_MAX_MEMORY_SIZE", default=12 * 1024 * 1024)
+FILE_UPLOAD_MAX_MEMORY_SIZE = env.int("FILE_UPLOAD_MAX_MEMORY_SIZE", default=12 * 1024 * 1024)
+
 ALLOWED_HOSTS = env.list("DJANGO_ALLOWED_HOSTS", default=[])
 
 INSTALLED_APPS = [
@@ -36,6 +39,8 @@ INSTALLED_APPS = [
     "django.contrib.staticfiles",
     # Third-party
     "rest_framework",
+    "rest_framework_simplejwt",
+    "rest_framework_simplejwt.token_blacklist",
     "corsheaders",
     "django_filters",
     "drf_spectacular",
@@ -146,7 +151,6 @@ REST_FRAMEWORK = {
     "PAGE_SIZE": 50,
     "DEFAULT_AUTHENTICATION_CLASSES": [
         "rest_framework_simplejwt.authentication.JWTAuthentication",
-        "rest_framework.authentication.SessionAuthentication",
     ],
     "DEFAULT_PERMISSION_CLASSES": [
         "rest_framework.permissions.IsAuthenticated",
@@ -165,7 +169,7 @@ SIMPLE_JWT = {
         days=env.int("JWT_REFRESH_DAYS", default=7)
     ),
     "ROTATE_REFRESH_TOKENS": True,
-    "BLACKLIST_AFTER_ROTATION": False,
+    "BLACKLIST_AFTER_ROTATION": env.bool("JWT_BLACKLIST_AFTER_ROTATION", default=True),
     "UPDATE_LAST_LOGIN": True,
     "AUTH_HEADER_TYPES": ("Bearer",),
     "AUTH_HEADER_NAME": "HTTP_AUTHORIZATION",
@@ -331,9 +335,10 @@ AWS_S3_REGION_NAME = env("AWS_S3_REGION_NAME", default="us-east-1")
 # Replace with real TIN in production; optional provider.tax_id field later.
 EDI_DEFAULT_BILLING_TAX_ID = env("EDI_DEFAULT_BILLING_TAX_ID", default="")
 EDI_MAX_SFTP_DOWNLOAD_BYTES = env.int("EDI_MAX_SFTP_DOWNLOAD_BYTES", default=5_000_000)
+EDI_SFTP_LIST_MAX_FILES = env.int("EDI_SFTP_LIST_MAX_FILES", default=5000)
 EDI_MAX_X12_CONTENT_CHARS = env.int("EDI_MAX_X12_CONTENT_CHARS", default=2_000_000)
 EDI_SFTP_REQUIRE_HOST_FINGERPRINT = env.bool(
-    "EDI_SFTP_REQUIRE_HOST_FINGERPRINT", default=False
+    "EDI_SFTP_REQUIRE_HOST_FINGERPRINT", default=True
 )
 
 # Claim document blob storage (MinIO/S3 primary; local MEDIA fallback).

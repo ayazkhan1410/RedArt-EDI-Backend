@@ -138,9 +138,12 @@ def upload_bytes_via_sftp(*, credentials, remote_dir, filename, data: bytes) -> 
     return remote_path
 
 
-def list_remote_files(*, credentials, remote_dir) -> list[dict]:
+def list_remote_files(*, credentials, remote_dir, max_files=None) -> list[dict]:
     if not remote_dir:
         raise ValueError("SFTP remote directory is required.")
+
+    if max_files is None:
+        max_files = int(getattr(settings, "EDI_SFTP_LIST_MAX_FILES", 5000))
 
     remote_dir = remote_dir.rstrip("/") or "/"
     results = []
@@ -151,6 +154,13 @@ def list_remote_files(*, credentials, remote_dir) -> list[dict]:
             raise ValueError(f"Remote directory not found: {remote_dir}") from exc
 
         for attr in entries:
+            if len(results) >= max_files:
+                logger.warning(
+                    "SFTP list truncated at %s files for %s",
+                    max_files,
+                    remote_dir,
+                )
+                break
             mode = getattr(attr, "st_mode", None)
             if mode is not None and stat.S_ISDIR(mode):
                 continue

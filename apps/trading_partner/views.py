@@ -16,6 +16,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.core.soft_delete import (
+    filter_active_for_list,
     client_error_message,
     get_active_object_or_404,
     get_api_object_or_404,
@@ -92,12 +93,7 @@ class TradingPartnerListCreateAPIView(APIView):
         try:
             partners = TradingPartner.objects.all().order_by("-id")
 
-            if request.query_params.get("include_inactive", "").lower() not in (
-                "1",
-                "true",
-                "yes",
-            ):
-                partners = partners.filter(is_active=True)
+            partners = filter_active_for_list(request, partners)
 
             environment = request.query_params.get("environment")
             if environment:

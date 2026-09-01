@@ -22,6 +22,7 @@ from apps.claim.utils.attachment_adapter import get_attachment_adapter, load_tra
 from apps.claim.utils.service import (
     assert_claim_ready_for_batch,
     evaluate_claim_documents,
+    prefetch_claim_documents_map,
     sync_claim_document_status,
     sync_claim_from_attachment_submission,
 )
@@ -89,8 +90,8 @@ def assert_no_duplicate_attachment_submission(claim_id: int, payload_hash: str |
     )
 
 
-def build_attachment_queue_row(claim: Claim) -> dict:
-    snapshot = evaluate_claim_documents(claim)
+def build_attachment_queue_row(claim: Claim, docs_by_type=None) -> dict:
+    snapshot = evaluate_claim_documents(claim, docs_by_type=docs_by_type)
     trip = claim.trip if claim.trip_id else None
     return {
         "claim_id": claim.id,
@@ -114,12 +115,18 @@ def list_attachment_queue(
     documents_complete: bool | None = None,
     can_submit: bool | None = None,
 ):
+    """Return queue rows for attachment-required claims (caller paginates queryset)."""
     claims = (
         Claim.objects.filter(is_active=True, attachment_required=True)
         .with_relations()
         .order_by("-id")
     )
-    rows = [build_attachment_queue_row(c) for c in claims]
+    claim_list = list(claims)
+    docs_map = prefetch_claim_documents_map([c.id for c in claim_list])
+    rows = [
+        build_attachment_queue_row(c, docs_map.get(c.id))
+        for c in claim_list
+    ]
 
     if documents_complete is not None:
         rows = [r for r in rows if r["documents_complete"] == documents_complete]
@@ -129,10 +136,35 @@ def list_attachment_queue(
     return rows
 
 
+def attachment_queue_claims_queryset():
+    """DB queryset for paginated attachment queue (before doc snapshot filters)."""
+    return (
+        Claim.objects.filter(is_active=True, attachment_required=True)
+        .with_relations()
+        .order_by("-id")
+    )
+
+
+def build_attachment_queue_page(claims, *, documents_complete=None, can_submit=None):
+    """Build queue rows for one paginated page of claims."""
+    docs_map = prefetch_claim_documents_map([c.id for c in claims])
+    rows = [
+        build_attachment_queue_row(c, docs_map.get(c.id))
+        for c in claims
+    ]
+    if documents_complete is not None:
+        rows = [r for r in rows if r["documents_complete"] == documents_complete]
+    if can_submit is not None:
+        rows = [r for r in rows if r["can_submit"] == can_submit]
+    return rows
+
+
 def build_attachment_dashboard() -> dict:
     base = Claim.objects.filter(is_active=True, attachment_required=True)
 
     long_distance_claims = base.count()
+    claim_ids = list(base.values_list("id", flat=True))
+    docs_map = prefetch_claim_documents_map(claim_ids)
 
     docs_complete_ids = set()
     missing_verification = 0
@@ -140,7 +172,10 @@ def build_attachment_dashboard() -> dict:
     missing_signature = 0
 
     for claim in base.only("id", "attachment_required"):
-        snapshot = evaluate_claim_documents(claim)
+        snapshot = evaluate_claim_documents(
+            claim,
+            docs_by_type=docs_map.get(claim.id),
+        )
         if snapshot["documents_complete"]:
             docs_complete_ids.add(claim.id)
         missing = set(snapshot["missing_types"])
@@ -149,15 +184,15 @@ def build_attachment_dashboard() -> dict:
             missing_verification += 1
         if DocumentType.STANDARD_TRIP_LOG in missing:
             missing_trip_log += 1
-        unsigned = ClaimDocument.objects.filter(
-            claim_id=claim.id,
-            is_active=True,
-            document_type__in=(
+        claim_docs = docs_map.get(claim.id, {})
+        unsigned = any(
+            doc.document_type in (
                 DocumentType.STANDARD_TRIP_LOG,
                 DocumentType.MILE_25_VERIFICATION,
-            ),
-            is_signed=False,
-        ).exists()
+            )
+            and not doc.is_signed
+            for doc in claim_docs.values()
+        )
         if unsigned or (
             DocumentType.MILE_25_VERIFICATION in incomplete
             or DocumentType.STANDARD_TRIP_LOG in incomplete
@@ -214,7 +249,6 @@ def build_attachment_dashboard() -> dict:
     }
 
 
-@transaction.atomic
 def submit_claim_attachments(
     claim_id: int,
     *,
@@ -225,81 +259,114 @@ def submit_claim_attachments(
 ) -> AttachmentSubmission:
     """
     Validate docs, guard duplicates, run adapter, persist AttachmentSubmission.
+    Network I/O runs outside DB transactions.
     """
-    claim = (
-        Claim.objects.select_for_update()
-        .filter(pk=claim_id, is_active=True)
-        .first()
-    )
-    if claim is None:
-        raise ValueError("Claim not found or inactive.")
-    if not claim.attachment_required:
-        raise ValueError("Claim does not require attachments.")
+    with transaction.atomic():
+        claim = (
+            Claim.objects.select_for_update()
+            .filter(pk=claim_id, is_active=True)
+            .first()
+        )
+        if claim is None:
+            raise ValueError("Claim not found or inactive.")
+        if not claim.attachment_required:
+            raise ValueError("Claim does not require attachments.")
 
-    sync_claim_document_status(claim)
-    claim.refresh_from_db()
-    assert_claim_ready_for_batch(claim)
+        sync_claim_document_status(claim)
+        claim.refresh_from_db()
+        assert_claim_ready_for_batch(claim)
 
-    documents = load_transmit_documents(claim.id)
+        payload_hash = compute_claim_document_payload_hash(claim.id)
+        duplicate = find_duplicate_attachment_submission(claim.id, payload_hash)
+        if duplicate is not None:
+            assert_no_duplicate_attachment_submission(claim.id, payload_hash)
+
+        if allow_retry and payload_hash:
+            failed_row = (
+                AttachmentSubmission.objects.filter(
+                    claim_id=claim.id,
+                    is_active=True,
+                    payload_hash=payload_hash,
+                    status=AttachmentSubmissionStatus.FAILED,
+                )
+                .order_by("-id")
+                .first()
+            )
+            if failed_row is not None:
+                failed_row.retry_count = (failed_row.retry_count or 0) + 1
+                failed_row.is_active = False
+                failed_row.save(update_fields=["retry_count", "is_active", "updated_at"])
+
+        route = (channel or claim.attachment_route or AttachmentRoute.HCPF_PORTAL).strip().upper()
+        submission = AttachmentSubmission.objects.create(
+            claim=claim,
+            channel=route,
+            submission_reference=(submission_reference or "").strip() or None,
+            payload_hash=payload_hash,
+            status=AttachmentSubmissionStatus.QUEUED,
+            is_active=True,
+        )
+        submission_id = submission.id
+        route_saved = route
+
+    documents = load_transmit_documents(claim_id)
     if not documents:
+        with transaction.atomic():
+            submission = AttachmentSubmission.objects.select_for_update().get(pk=submission_id)
+            submission.status = AttachmentSubmissionStatus.FAILED
+            submission.notes = "No stored document files found."
+            submission.save(update_fields=["status", "notes", "updated_at"])
+            sync_claim_from_attachment_submission(submission)
         raise ValueError(
             "No stored document files found. Upload PDFs before attachment submit."
         )
 
-    payload_hash = compute_claim_document_payload_hash(claim.id)
-    duplicate = find_duplicate_attachment_submission(claim.id, payload_hash)
-    if duplicate is not None:
-        assert_no_duplicate_attachment_submission(claim.id, payload_hash)
-
-    if allow_retry and payload_hash:
-        failed_row = (
-            AttachmentSubmission.objects.filter(
-                claim_id=claim.id,
-                is_active=True,
-                payload_hash=payload_hash,
-                status=AttachmentSubmissionStatus.FAILED,
-            )
-            .order_by("-id")
-            .first()
+    claim = Claim.objects.get(pk=claim_id)
+    adapter = get_attachment_adapter(route_saved)
+    try:
+        result = adapter.transmit(
+            claim,
+            documents,
+            submission_reference=submission_reference,
+            environment=environment,
         )
-        if failed_row is not None:
-            failed_row.retry_count = (failed_row.retry_count or 0) + 1
-            failed_row.is_active = False
-            failed_row.save(update_fields=["retry_count", "is_active", "updated_at"])
+    except Exception as exc:
+        with transaction.atomic():
+            submission = AttachmentSubmission.objects.select_for_update().get(pk=submission_id)
+            submission.status = AttachmentSubmissionStatus.FAILED
+            submission.notes = str(exc)[:500]
+            submission.save(update_fields=["status", "notes", "updated_at"])
+            sync_claim_from_attachment_submission(submission)
+        raise
 
-    route = (channel or claim.attachment_route or AttachmentRoute.HCPF_PORTAL).strip().upper()
-    adapter = get_attachment_adapter(route)
-    result = adapter.transmit(
-        claim,
-        documents,
-        submission_reference=submission_reference,
-        environment=environment,
-    )
+    with transaction.atomic():
+        submission = AttachmentSubmission.objects.select_for_update().get(pk=submission_id)
+        submission.submission_reference = result.submission_reference
+        submission.remote_path = result.remote_path
+        submission.status = result.status
+        submission.notes = result.notes
+        if result.status in (
+            AttachmentSubmissionStatus.SUBMITTED,
+            AttachmentSubmissionStatus.CONFIRMED,
+        ):
+            submission.submitted_at = timezone.now()
+        submission.save(
+            update_fields=[
+                "submission_reference",
+                "remote_path",
+                "status",
+                "notes",
+                "submitted_at",
+                "updated_at",
+            ]
+        )
+        sync_claim_from_attachment_submission(submission)
 
-    submission = AttachmentSubmission.objects.create(
-        claim=claim,
-        channel=route,
-        submission_reference=result.submission_reference,
-        payload_hash=payload_hash,
-        remote_path=result.remote_path,
-        status=result.status,
-        notes=result.notes,
-        submitted_at=(
-            timezone.now()
-            if result.status in (
-                AttachmentSubmissionStatus.SUBMITTED,
-                AttachmentSubmissionStatus.CONFIRMED,
-            )
-            else None
-        ),
-        is_active=True,
-    )
-    sync_claim_from_attachment_submission(submission)
     logger.info(
         "Attachment submit claim_id=%s submission_id=%s channel=%s status=%s",
-        claim.id,
-        submission.id,
-        route,
+        claim_id,
+        submission_id,
+        route_saved,
         result.status,
     )
     return submission

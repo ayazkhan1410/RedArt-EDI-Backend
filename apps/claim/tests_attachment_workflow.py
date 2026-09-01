@@ -201,7 +201,6 @@ class AttachmentWorkflowAPITests(AttachmentWorkflowFixturesMixin, AuthAPITestCas
         payload = {
             "claim": self.claim.id,
             "channel": "HCPF_PORTAL",
-            "status": "CONFIRMED",
             "submission_reference": "PORTAL-REF-1",
         }
         first = self.client.post(
@@ -216,8 +215,7 @@ class AttachmentWorkflowAPITests(AttachmentWorkflowFixturesMixin, AuthAPITestCas
             payload,
             format="json",
         )
-        self.assertEqual(second.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertIn("Duplicate", str(second.data))
+        self.assertEqual(second.status_code, status.HTTP_409_CONFLICT)
 
     @patch("apps.edi.utils.s3_client.upload_bytes_to_s3", return_value="s3://edi-files/x.pdf")
     def test_portal_submit_without_reference_queues(self, _mock_s3):

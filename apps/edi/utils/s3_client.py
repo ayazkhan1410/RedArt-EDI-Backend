@@ -27,12 +27,16 @@ def ensure_bucket(bucket=None):
     client = get_s3_client()
     try:
         client.head_bucket(Bucket=bucket)
-    except Exception:
+    except Exception as exc:
+        if not settings.DEBUG:
+            raise ValueError(
+                f"S3 bucket '{bucket}' is not accessible. "
+                "Create the bucket during infrastructure setup."
+            ) from exc
         try:
             client.create_bucket(Bucket=bucket)
             logger.info("Created S3/MinIO bucket=%s", bucket)
         except Exception:
-            # Race or already exists under another error shape.
             logger.exception("ensure_bucket failed for %s", bucket)
             raise
     return bucket

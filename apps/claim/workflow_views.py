@@ -3,8 +3,9 @@
 import logging
 import traceback
 
-from django.db import IntegrityError
+from django.db import IntegrityError, transaction
 from django.http import Http404, HttpResponse
+from django.utils.http import content_disposition_header
 from drf_spectacular.utils import OpenApiParameter, extend_schema, extend_schema_view
 from rest_framework import status
 from rest_framework.exceptions import ValidationError
@@ -23,14 +24,16 @@ from apps.claim.serializers import (
     SubmitAttachmentSerializer,
 )
 from apps.claim.utils.attachment_service import (
+    attachment_queue_claims_queryset,
     build_attachment_dashboard,
+    build_attachment_queue_page,
     bulk_review_attachments,
-    list_attachment_queue,
     submit_claim_attachments,
     upsert_claim_document_from_upload,
 )
 from apps.claim.utils.document_storage import (
     download_claim_document_bytes,
+    max_claim_document_bytes,
     upload_claim_document_bytes,
 )
 from apps.claim.utils.validators import parse_optional_bool
@@ -63,12 +66,14 @@ class ClaimAttachmentQueueAPIView(APIView):
             )
             can_submit = parse_optional_bool(request.query_params.get("can_submit"))
 
-            rows = list_attachment_queue(
+            claims_qs = attachment_queue_claims_queryset()
+            paginator = StandardPagination()
+            page_claims = paginator.paginate_queryset(claims_qs, request, view=self)
+            page = build_attachment_queue_page(
+                page_claims or [],
                 documents_complete=documents_complete,
                 can_submit=can_submit,
             )
-            paginator = StandardPagination()
-            page = paginator.paginate_queryset(rows, request, view=self)
             return Response(
                 {
                     "success": True,
@@ -125,6 +130,12 @@ class ClaimDocumentUploadAPIView(APIView):
 
             claim = get_active_object_or_404(Claim.objects.all(), pk=serializer.validated_data["claim"])
             upload_file = serializer.validated_data["file"]
+            max_bytes = max_claim_document_bytes()
+            if upload_file.size > max_bytes:
+                return error_response(
+                    f"File exceeds maximum size of {max_bytes} bytes.",
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                )
             data = upload_file.read()
             stored = upload_claim_document_bytes(
                 claim_id=claim.id,
@@ -133,19 +144,24 @@ class ClaimDocumentUploadAPIView(APIView):
                 data=data,
                 content_type=upload_file.content_type,
             )
-            doc = upsert_claim_document_from_upload(
-                claim=claim,
-                document_type=serializer.validated_data["document_type"],
-                file_name=stored["file_name"],
-                document_hash=stored["document_hash"],
-                blob_ref=stored["blob_ref"],
-                content_type=stored["content_type"],
-                file_size=stored["file_size"],
-                is_signed=serializer.validated_data.get("is_signed", False),
-                status=serializer.validated_data.get("status"),
-                service_date=serializer.validated_data.get("service_date"),
-                verification_date=serializer.validated_data.get("verification_date"),
-            )
+            try:
+                with transaction.atomic():
+                    doc = upsert_claim_document_from_upload(
+                        claim=claim,
+                        document_type=serializer.validated_data["document_type"],
+                        file_name=stored["file_name"],
+                        document_hash=stored["document_hash"],
+                        blob_ref=stored["blob_ref"],
+                        content_type=stored["content_type"],
+                        file_size=stored["file_size"],
+                        is_signed=serializer.validated_data.get("is_signed", False),
+                        status=serializer.validated_data.get("status"),
+                        service_date=serializer.validated_data.get("service_date"),
+                        verification_date=serializer.validated_data.get("verification_date"),
+                    )
+            except Exception:
+                logger.error("DB upsert failed after blob upload claim_id=%s", claim.id)
+                raise
             logger.info("Uploaded claim document id=%s claim_id=%s", doc.id, claim.id)
             return success_response(
                 "Claim document uploaded successfully.",
@@ -188,7 +204,10 @@ class ClaimDocumentFileAPIView(APIView):
             body, content_type = download_claim_document_bytes(doc.blob_ref)
             response = HttpResponse(body, content_type=content_type)
             if doc.file_name:
-                response["Content-Disposition"] = f'inline; filename="{doc.file_name}"'
+                response.headers["Content-Disposition"] = content_disposition_header(
+                    filename=doc.file_name,
+                    as_attachment=False,
+                )
             return response
         except Http404:
             return error_response(

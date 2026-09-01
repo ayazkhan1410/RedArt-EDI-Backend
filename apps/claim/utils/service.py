@@ -65,10 +65,34 @@ def document_is_ready(doc):
         and doc.is_active
         and doc.status == DocumentStatus.COMPLETE
         and bool(doc.is_signed)
+        and bool((doc.blob_ref or "").strip())
     )
 
 
-def evaluate_claim_documents(claim):
+def prefetch_claim_documents_map(claim_ids):
+    """Bulk-load active documents keyed by claim_id → document_type."""
+    if not claim_ids:
+        return {}
+    rows = ClaimDocument.objects.filter(
+        claim_id__in=claim_ids,
+        is_active=True,
+    ).only(
+        "claim_id",
+        "document_type",
+        "status",
+        "is_signed",
+        "blob_ref",
+        "is_active",
+    )
+    by_claim: dict[int, dict] = {}
+    for doc in rows:
+        if not doc.document_type:
+            continue
+        by_claim.setdefault(doc.claim_id, {})[doc.document_type] = doc
+    return by_claim
+
+
+def evaluate_claim_documents(claim, docs_by_type=None):
     """
     Return completeness snapshot for a claim.
     Long-distance claims need trip log + 25+ verification, both signed COMPLETE.
@@ -77,11 +101,14 @@ def evaluate_claim_documents(claim):
     if claim.attachment_required:
         required = list(REQUIRED_LONG_DISTANCE_DOC_TYPES)
 
-    docs = {
-        d.document_type: d
-        for d in ClaimDocument.objects.filter(claim_id=claim.id, is_active=True)
-        if d.document_type
-    }
+    if docs_by_type is None:
+        docs = {
+            d.document_type: d
+            for d in ClaimDocument.objects.filter(claim_id=claim.id, is_active=True)
+            if d.document_type
+        }
+    else:
+        docs = docs_by_type
 
     missing = []
     incomplete = []

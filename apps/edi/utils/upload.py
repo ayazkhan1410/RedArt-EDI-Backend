@@ -81,9 +81,17 @@ def _download_s3_bytes(s3_uri: str) -> bytes:
         raise ValueError(f"Invalid S3 URI: {s3_uri}")
     from apps.edi.utils.s3_client import get_s3_client
 
+    max_bytes = int(getattr(settings, "EDI_MAX_SFTP_DOWNLOAD_BYTES", 5_000_000))
     client = get_s3_client()
+    head = client.head_object(Bucket=bucket, Key=key)
+    content_length = head.get("ContentLength")
+    if content_length is not None and content_length > max_bytes:
+        raise ValueError(f"EDI file exceeds maximum size of {max_bytes} bytes.")
     obj = client.get_object(Bucket=bucket, Key=key)
-    return obj["Body"].read()
+    body = obj["Body"].read(max_bytes + 1)
+    if len(body) > max_bytes:
+        raise ValueError(f"EDI file exceeds maximum size of {max_bytes} bytes.")
+    return body
 
 
 def read_edi_file_bytes(edi_file: EDIFile) -> bytes:
@@ -109,6 +117,10 @@ def read_edi_file_bytes(edi_file: EDIFile) -> bytes:
                     edi_file.id,
                     rel,
                 )
+            max_bytes = int(getattr(settings, "EDI_MAX_SFTP_DOWNLOAD_BYTES", 5_000_000))
+            size = path.stat().st_size
+            if size > max_bytes:
+                raise ValueError(f"EDI file exceeds maximum size of {max_bytes} bytes.")
             return path.read_bytes()
 
     ref = (edi_file.path_or_blob_ref or "").strip()
@@ -123,10 +135,10 @@ def read_edi_file_bytes(edi_file: EDIFile) -> bytes:
 
 
 @transaction.atomic
-def queue_edi_file_upload(*, edi_file_id, credentials_id=None):
+def queue_edi_file_upload(*, edi_file_id, credentials_id=None, async_mode=False):
     """
     Mark file UPLOAD_QUEUED and create PENDING transfer log rows.
-    Allows resend after GENERATED / FAILED / UPLOADED / UPLOAD_QUEUED.
+    Allows resend after GENERATED / FAILED / UPLOADED (not while in-flight).
     Returns (edi_file, attempt, sftp_log, s3_log).
     """
     edi_file = (
@@ -141,9 +153,17 @@ def queue_edi_file_upload(*, edi_file_id, credentials_id=None):
     allowed = {
         EDIFileStatus.GENERATED,
         EDIFileStatus.FAILED,
-        EDIFileStatus.UPLOAD_QUEUED,
         EDIFileStatus.UPLOADED,
     }
+    if edi_file.status == EDIFileStatus.UPLOAD_QUEUED:
+        in_flight = EDIFileTransferLog.objects.filter(
+            edi_file_id=edi_file.id,
+            status__in=(TransferLogStatus.PENDING, TransferLogStatus.IN_PROGRESS),
+            is_active=True,
+        ).exists()
+        if in_flight:
+            raise ValueError("EDI file upload is already queued or in progress.")
+        allowed = allowed | {EDIFileStatus.UPLOAD_QUEUED}
     if edi_file.status not in allowed:
         raise ValueError(
             f"EDI file status {edi_file.status} cannot be queued for upload."
@@ -240,63 +260,71 @@ def run_edi_file_upload(*, edi_file_id, attempt, task_id=None, credentials_id=No
     s3_uri = None
     remote_sftp = None
 
-    _mark_log(
-        sftp_log,
-        status=TransferLogStatus.IN_PROGRESS,
-        message="Uploading to SFTP…",
-        task_id=task_id,
-    )
-    try:
-        remote_sftp = upload_bytes_via_sftp(
-            credentials=credentials,
-            remote_dir=send_path,
-            filename=filename,
-            data=data,
-        )
-        _mark_log(
-            sftp_log,
-            status=TransferLogStatus.SUCCESS,
-            message="Uploaded to SFTP successfully.",
-            remote_path=remote_sftp,
-            task_id=task_id,
-        )
+    if sftp_log.status == TransferLogStatus.SUCCESS:
         sftp_ok = True
-    except Exception as exc:
+        remote_sftp = sftp_log.remote_path
+    else:
         _mark_log(
             sftp_log,
-            status=TransferLogStatus.FAILED,
-            message=str(exc)[:500],
-            detail=str(exc)[:2000],
+            status=TransferLogStatus.IN_PROGRESS,
+            message="Uploading to SFTP…",
             task_id=task_id,
         )
-        logger.exception("SFTP upload failed edi_file_id=%s", edi_file_id)
+        try:
+            remote_sftp = upload_bytes_via_sftp(
+                credentials=credentials,
+                remote_dir=send_path,
+                filename=filename,
+                data=data,
+            )
+            _mark_log(
+                sftp_log,
+                status=TransferLogStatus.SUCCESS,
+                message="Uploaded to SFTP successfully.",
+                remote_path=remote_sftp,
+                task_id=task_id,
+            )
+            sftp_ok = True
+        except Exception as exc:
+            _mark_log(
+                sftp_log,
+                status=TransferLogStatus.FAILED,
+                message=str(exc)[:500],
+                detail=str(exc)[:2000],
+                task_id=task_id,
+            )
+            logger.exception("SFTP upload failed edi_file_id=%s", edi_file_id)
 
-    _mark_log(
-        s3_log,
-        status=TransferLogStatus.IN_PROGRESS,
-        message="Uploading to MinIO/S3…",
-        task_id=task_id,
-    )
-    try:
-        key = f"edi/837p/{edi_file.batch_id or 'unknown'}/{filename}"
-        s3_uri = upload_bytes_to_s3(key=key, data=data)
-        _mark_log(
-            s3_log,
-            status=TransferLogStatus.SUCCESS,
-            message="Uploaded to MinIO/S3 successfully.",
-            remote_path=s3_uri,
-            task_id=task_id,
-        )
+    if s3_log.status == TransferLogStatus.SUCCESS:
         s3_ok = True
-    except Exception as exc:
+        s3_uri = s3_log.remote_path
+    else:
         _mark_log(
             s3_log,
-            status=TransferLogStatus.FAILED,
-            message=str(exc)[:500],
-            detail=str(exc)[:2000],
+            status=TransferLogStatus.IN_PROGRESS,
+            message="Uploading to MinIO/S3…",
             task_id=task_id,
         )
-        logger.exception("S3 upload failed edi_file_id=%s", edi_file_id)
+        try:
+            key = f"edi/837p/{edi_file.batch_id or 'unknown'}/{filename}"
+            s3_uri = upload_bytes_to_s3(key=key, data=data)
+            _mark_log(
+                s3_log,
+                status=TransferLogStatus.SUCCESS,
+                message="Uploaded to MinIO/S3 successfully.",
+                remote_path=s3_uri,
+                task_id=task_id,
+            )
+            s3_ok = True
+        except Exception as exc:
+            _mark_log(
+                s3_log,
+                status=TransferLogStatus.FAILED,
+                message=str(exc)[:500],
+                detail=str(exc)[:2000],
+                task_id=task_id,
+            )
+            logger.exception("S3 upload failed edi_file_id=%s", edi_file_id)
 
     if sftp_ok and s3_ok:
         # Keep local media path on EDIFile so retries/resends can re-read the file.

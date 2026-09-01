@@ -141,7 +141,15 @@ class EDIFileSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
         )
-        read_only_fields = ("id", "created_at", "updated_at")
+        read_only_fields = (
+            "id",
+            "status",
+            "path_or_blob_ref",
+            "uploaded_at",
+            "is_active",
+            "created_at",
+            "updated_at",
+        )
 
     def validate_transaction_type(self, value):
         if value in (None, ""):
@@ -440,7 +448,7 @@ class ApplyEDIAcknowledgementSerializer(serializers.Serializer):
     )
     edi_file_id = serializers.IntegerField(required=False, allow_null=True)
     message = serializers.CharField(required=False, allow_blank=True, allow_null=True)
-    apply_claim_status = serializers.BooleanField(required=False, default=True)
+    apply_claim_status = serializers.BooleanField(required=False, default=False)
 
     def validate_ack_type(self, value):
         if value in (None, ""):
@@ -480,7 +488,7 @@ class Import999AcknowledgementSerializer(serializers.Serializer):
     raw_file_ref = serializers.CharField(
         required=False, allow_blank=True, allow_null=True
     )
-    apply_claim_status = serializers.BooleanField(required=False, default=True)
+    apply_claim_status = serializers.BooleanField(required=False, default=False)
 
     def validate_content(self, value):
         from django.conf import settings
@@ -624,7 +632,7 @@ class Import835RemittanceSerializer(serializers.Serializer):
     raw_file_ref = serializers.CharField(
         required=False, allow_blank=True, allow_null=True
     )
-    apply_claim_status = serializers.BooleanField(required=False, default=True)
+    apply_claim_status = serializers.BooleanField(required=False, default=False)
 
     def validate_content(self, value):
         text = (value or "").strip()
@@ -779,7 +787,7 @@ class Import277AcknowledgementSerializer(serializers.Serializer):
     raw_file_ref = serializers.CharField(
         required=False, allow_blank=True, allow_null=True
     )
-    apply_claim_status = serializers.BooleanField(required=False, default=True)
+    apply_claim_status = serializers.BooleanField(required=False, default=False)
 
     def validate_content(self, value):
         from django.conf import settings

@@ -21,6 +21,7 @@ from apps.edi.models import (
     EDIFile,
     SFTPDirectory,
 )
+from apps.edi.utils.import_errors import PermanentImportError
 from apps.edi.utils.service import import_999_acknowledgement
 from apps.edi.utils.sftp_client import download_bytes_via_sftp, list_remote_files
 from apps.edi.utils.x12 import parse_999
@@ -187,18 +188,22 @@ def discover_edi_999_imports(*, credentials_id=None, batch_id=None):
                 if existing:
                     skipped_existing += 1
                     if existing.status == EDI999ImportStatus.FAILED:
-                        existing.status = EDI999ImportStatus.QUEUED
-                        existing.message = "Re-queued by 999 import poll."
-                        existing.finished_at = None
-                        existing.save(
-                            update_fields=[
-                                "status",
-                                "message",
-                                "finished_at",
-                                "updated_at",
-                            ]
-                        )
-                        created.append(existing)
+                        if existing.status not in (
+                            EDI999ImportStatus.DOWNLOADING,
+                            EDI999ImportStatus.PARSING,
+                        ):
+                            existing.status = EDI999ImportStatus.QUEUED
+                            existing.message = "Re-queued by 999 import poll."
+                            existing.finished_at = None
+                            existing.save(
+                                update_fields=[
+                                    "status",
+                                    "message",
+                                    "finished_at",
+                                    "updated_at",
+                                ]
+                            )
+                            created.append(existing)
                     continue
 
                 row = EDI999Import.objects.create(
@@ -245,6 +250,17 @@ def process_edi_999_import(import_id, *, batch_id=None):
                 "skipped": True,
             }
 
+        if row.status in (
+            EDI999ImportStatus.DOWNLOADING,
+            EDI999ImportStatus.PARSING,
+        ):
+            return {
+                "id": row.id,
+                "status": row.status,
+                "skipped": True,
+                "message": "Import already in progress.",
+            }
+
         if not row.credentials_id:
             _mark(
                 row,
@@ -252,21 +268,20 @@ def process_edi_999_import(import_id, *, batch_id=None):
                 message="Missing SFTP credentials on import row.",
                 finished=True,
             )
-            raise ValueError(row.message)
+            raise PermanentImportError(row.message)
 
         row.attempt = (row.attempt or 0) + 1
         row.started_at = row.started_at or timezone.now()
-        row.save(update_fields=["attempt", "started_at", "updated_at"])
+        row.status = EDI999ImportStatus.DOWNLOADING
+        row.message = f"Downloading from SFTP (attempt {row.attempt})."
+        row.save(
+            update_fields=["attempt", "started_at", "status", "message", "updated_at"]
+        )
         credentials = row.credentials
         remote_path = row.remote_path
         attempt = row.attempt
         row_id = row.id
 
-    _mark(
-        row,
-        status=EDI999ImportStatus.DOWNLOADING,
-        message=f"Downloading from SFTP (attempt {attempt}).",
-    )
     try:
         data = download_bytes_via_sftp(
             credentials=credentials,
@@ -347,45 +362,61 @@ def process_edi_999_import(import_id, *, batch_id=None):
             detail=str(parsed.get("ak1")),
             finished=True,
         )
-        raise ValueError(row.message)
+        raise PermanentImportError(row.message)
 
-    if resolved_batch and not row.batch_id:
-        row.batch = resolved_batch
-    if resolved_edi and not row.edi_file_id:
-        row.edi_file = resolved_edi
-    row.save(update_fields=["batch", "edi_file", "updated_at"])
-
-    try:
-        (ack, claim_ids), parsed_out = import_999_acknowledgement(
-            content=text,
-            batch_id=use_batch_id,
-            edi_file_id=row.edi_file_id,
-            raw_file_ref=row.remote_path,
-            apply_claim_status=True,
+    with transaction.atomic():
+        row = (
+            EDI999Import.objects.select_for_update(of=("self",))
+            .filter(pk=import_id, is_active=True)
+            .first()
         )
-    except Exception as exc:
+        if row is None:
+            raise ValueError("EDI 999 import row not found or inactive.")
+        if row.status == EDI999ImportStatus.IMPORTED:
+            return {
+                "id": row.id,
+                "status": row.status,
+                "acknowledgement_id": row.acknowledgement_id,
+                "skipped": True,
+            }
+
+        if resolved_batch and not row.batch_id:
+            row.batch = resolved_batch
+        if resolved_edi and not row.edi_file_id:
+            row.edi_file = resolved_edi
+        row.save(update_fields=["batch", "edi_file", "updated_at"])
+
+        try:
+            (ack, claim_ids), parsed_out = import_999_acknowledgement(
+                content=text,
+                batch_id=use_batch_id,
+                edi_file_id=row.edi_file_id,
+                raw_file_ref=row.remote_path,
+                apply_claim_status=True,
+            )
+        except Exception as exc:
+            _mark(
+                row,
+                status=EDI999ImportStatus.FAILED,
+                message=str(exc)[:500],
+                detail=str(exc)[:2000],
+                finished=True,
+            )
+            raise
+
+        row.acknowledgement = ack
+        row.batch_id = ack.batch_id or use_batch_id
+        row.save(update_fields=["acknowledgement", "batch", "updated_at"])
         _mark(
             row,
-            status=EDI999ImportStatus.FAILED,
-            message=str(exc)[:500],
-            detail=str(exc)[:2000],
+            status=EDI999ImportStatus.IMPORTED,
+            message=(
+                f"Imported 999 status={ack.status} st02={ack.affected_st02}; "
+                f"claims={claim_ids}."
+            ),
+            detail=str(parsed_out.get("message") or ""),
             finished=True,
         )
-        raise
-
-    row.acknowledgement = ack
-    row.batch_id = ack.batch_id or use_batch_id
-    row.save(update_fields=["acknowledgement", "batch", "updated_at"])
-    _mark(
-        row,
-        status=EDI999ImportStatus.IMPORTED,
-        message=(
-            f"Imported 999 status={ack.status} st02={ack.affected_st02}; "
-            f"claims={claim_ids}."
-        ),
-        detail=str(parsed_out.get("message") or ""),
-        finished=True,
-    )
     logger.info(
         "EDI999Import id=%s imported acknowledgement_id=%s claims=%s",
         row.id,

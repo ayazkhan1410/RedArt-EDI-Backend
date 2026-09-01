@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import logging
 
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.db.models import Q
 
 from apps.claim.choices import ClaimStatus
@@ -108,21 +108,36 @@ def import_835_remittance(
         return existing, applied_ids, {"idempotent": True, "parsed": None}
 
     parsed = parse_835(content)
-    remittance = EDI835Remittance.objects.create(
-        file_hash=digest,
-        raw_file_ref=(raw_file_ref or "").strip() or None,
-        isa13=parsed.get("isa13"),
-        gs06=parsed.get("gs06"),
-        st02=parsed.get("st02"),
-        trace_number=parsed.get("trace_number"),
-        payment_method=parsed.get("payment_method"),
-        total_payment=parsed.get("total_payment"),
-        payment_date=parsed.get("payment_date"),
-        message=parsed.get("message"),
-        claim_line_count=len(parsed["claims"]),
-        applied_claim_count=0,
-        is_active=True,
-    )
+    try:
+        remittance = EDI835Remittance.objects.create(
+            file_hash=digest,
+            raw_file_ref=(raw_file_ref or "").strip() or None,
+            isa13=parsed.get("isa13"),
+            gs06=parsed.get("gs06"),
+            st02=parsed.get("st02"),
+            trace_number=parsed.get("trace_number"),
+            payment_method=parsed.get("payment_method"),
+            total_payment=parsed.get("total_payment"),
+            payment_date=parsed.get("payment_date"),
+            message=parsed.get("message"),
+            claim_line_count=len(parsed["claims"]),
+            applied_claim_count=0,
+            is_active=True,
+        )
+    except IntegrityError:
+        existing = (
+            EDI835Remittance.objects.filter(file_hash=digest, is_active=True)
+            .prefetch_related("claim_payments")
+            .first()
+        )
+        if existing is None:
+            raise
+        applied_ids = list(
+            existing.claim_payments.filter(
+                status_applied=True, claim_id__isnull=False, is_active=True
+            ).values_list("claim_id", flat=True)
+        )
+        return existing, applied_ids, {"idempotent": True, "parsed": None}
 
     updated_claim_ids: list[int] = []
     applied_count = 0

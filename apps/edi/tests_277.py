@@ -106,6 +106,7 @@ class Import277APITests(EDIFixturesMixin, AuthAPITestCase):
             {
                 "batch_id": self.batch.id,
                 "content": content,
+                "apply_claim_status": True,
             },
             format="json",
         )

@@ -16,6 +16,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.core.soft_delete import (
+    filter_active_for_list,
     client_error_message,
     get_active_object_or_404,
     get_api_object_or_404,
@@ -88,12 +89,7 @@ class SubmissionBatchListCreateAPIView(APIView):
         try:
             batches = SubmissionBatch.objects.with_relations().order_by("-id")
 
-            if request.query_params.get("include_inactive", "").lower() not in (
-                "1",
-                "true",
-                "yes",
-            ):
-                batches = batches.filter(is_active=True)
+            batches = filter_active_for_list(request, batches)
 
             status_filter = request.query_params.get("status", "").strip()
             if status_filter:
@@ -387,12 +383,7 @@ class BatchClaimListCreateAPIView(APIView):
         try:
             rows = BatchClaim.objects.with_relations().order_by("-id")
 
-            if request.query_params.get("include_inactive", "").lower() not in (
-                "1",
-                "true",
-                "yes",
-            ):
-                rows = rows.filter(is_active=True)
+            rows = filter_active_for_list(request, rows)
 
             batch_id = parse_optional_int(
                 request.query_params.get("batch_id"), "batch_id"

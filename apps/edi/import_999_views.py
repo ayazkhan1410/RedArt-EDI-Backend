@@ -11,7 +11,9 @@ from drf_spectacular.utils import OpenApiExample, OpenApiParameter, extend_schem
 from rest_framework import status
 from rest_framework.views import APIView
 
+from apps.core.permissions import CanOrchestrateEDI
 from apps.core.soft_delete import (
+    filter_active_for_list,
     client_error_message,
     get_active_object_or_404,
     get_api_object_or_404,
@@ -53,12 +55,7 @@ class EDI999ImportListAPIView(APIView):
     def get(self, request):
         try:
             rows = EDI999Import.objects.with_relations().order_by("-id")
-            if request.query_params.get("include_inactive", "").lower() not in (
-                "1",
-                "true",
-                "yes",
-            ):
-                rows = rows.filter(is_active=True)
+            rows = filter_active_for_list(request, rows)
 
             status_filter = (request.query_params.get("status") or "").strip().upper()
             if status_filter:
@@ -121,6 +118,8 @@ class EDI999ImportDetailAPIView(APIView):
 
 
 class EDI999ImportPollAPIView(APIView):
+    permission_classes = [CanOrchestrateEDI]
+
     """
     Manual trigger: discover inbound 999 files on SFTP and start importing.
     Prefer async_mode=true so the HTTP call returns immediately with Celery task id.

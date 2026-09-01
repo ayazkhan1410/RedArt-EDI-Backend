@@ -12,6 +12,7 @@ from rest_framework import status
 from rest_framework.views import APIView
 
 from apps.core.soft_delete import (
+    filter_active_for_list,
     client_error_message,
     get_active_object_or_404,
     get_api_object_or_404,
@@ -19,6 +20,7 @@ from apps.core.soft_delete import (
     parse_hard_flag,
 )
 
+from apps.core.permissions import CanOrchestrateEDI
 from apps.claim.utils.validators import parse_optional_int
 from apps.core.pagination import StandardPagination
 from apps.core.utils.responses import error_response, success_response
@@ -52,12 +54,7 @@ class EDI835ImportListAPIView(APIView):
     def get(self, request):
         try:
             rows = EDI835Import.objects.with_relations().order_by("-id")
-            if request.query_params.get("include_inactive", "").lower() not in (
-                "1",
-                "true",
-                "yes",
-            ):
-                rows = rows.filter(is_active=True)
+            rows = filter_active_for_list(request, rows)
 
             status_filter = (request.query_params.get("status") or "").strip().upper()
             if status_filter:
@@ -113,6 +110,8 @@ class EDI835ImportDetailAPIView(APIView):
 
 
 class EDI835ImportPollAPIView(APIView):
+    permission_classes = [CanOrchestrateEDI]
+
     @extend_schema(
         tags=[TAG],
         summary="Poll SFTP for inbound 835 ERA files",
