@@ -123,6 +123,13 @@ def read_edi_file_bytes(edi_file: EDIFile) -> bytes:
                 raise ValueError(f"EDI file exceeds maximum size of {max_bytes} bytes.")
             return path.read_bytes()
 
+    if edi_file.content:
+        data = edi_file.content.encode("utf-8")
+        max_bytes = int(getattr(settings, "EDI_MAX_SFTP_DOWNLOAD_BYTES", 5_000_000))
+        if len(data) > max_bytes:
+            raise ValueError(f"EDI file exceeds maximum size of {max_bytes} bytes.")
+        return data
+
     ref = (edi_file.path_or_blob_ref or "").strip()
     if ref.startswith("s3://"):
         logger.info("Reading EDIFile id=%s from S3 URI %s", edi_file.id, ref)
@@ -326,15 +333,16 @@ def run_edi_file_upload(*, edi_file_id, attempt, task_id=None, credentials_id=No
             )
             logger.exception("S3 upload failed edi_file_id=%s", edi_file_id)
 
-    if sftp_ok and s3_ok:
-        # Keep local media path on EDIFile so retries/resends can re-read the file.
-        # S3 URI is stored on the S3 transfer log (remote_path).
+    if sftp_ok:
+        # SFTP delivery is the authoritative payer submission. S3 is optional
+        # archival; generated content is already persisted on the EDIFile row.
         mark_edi_file_uploaded(edi_file.id)
         return {
             "edi_file_id": edi_file.id,
             "status": EDIFileStatus.UPLOADED,
             "sftp_path": remote_sftp,
             "s3_uri": s3_uri,
+            "s3_ok": s3_ok,
             "attempt": attempt,
         }
 
