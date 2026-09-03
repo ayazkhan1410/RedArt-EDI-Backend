@@ -114,31 +114,33 @@ class ClaimValidateStatusAPITests(AuthAPITestCase):
             },
         )
         self.partner = TradingPartner.objects.create(
-            name="REDART LLC",
-            sender_id="89513013",
+            name="Test Transport LLC",
+            sender_id="SMPLSENDER1",
             receiver_id="COMEDASSISTPROG",
             environment="TEST",
         )
         self.patient = Patient.objects.create(
-            first_name="JANE",
-            last_name="TESTPATIENT",
-            date_of_birth=date(1950, 1, 1),
+            first_name="TEST",
+            last_name="PATIENT",
+            date_of_birth=date(1970, 1, 1),
             gender="F",
-            medicaid_member_id="Y999999",
-            county="Pueblo",
-            address_line_1="100 TEST STREET",
-            city="PUEBLO",
+            medicaid_member_id="TSTVAL999",
+            county="Denver",
+            address_line_1="100 TEST ST",
+            city="DENVER",
             state="CO",
-            zip="81001",
+            zip="80000",
         )
         self.provider = ProviderBillingProfile.objects.create(
-            legal_name="REDART LLC",
-            billing_name="REDART LLC",
-            npi="9000211959",
-            address_line_1="1276 SANDALWOOD DR APT B",
-            city="COLORADO SPRINGS",
+            legal_name="Test Transport LLC",
+            billing_name="Test Transport LLC",
+            npi="1999999999",
+            tax_id="999999999",  # required for REF*EI (NPI provider)
+            taxonomy_code="343900000X",
+            address_line_1="100 TEST ST",
+            city="DENVER",
             state="CO",
-            zip="80918",
+            zip="80000",
         )
         self.trip = NemtTrip.objects.create(
             patient=self.patient,
@@ -176,9 +178,10 @@ class ClaimValidateStatusAPITests(AuthAPITestCase):
         self.claim.refresh_from_db()
         self.assertEqual(self.claim.status, ClaimStatus.READY_FOR_837P)
 
-    def test_validate_not_ready_missing_demographics(self):
-        self.patient.address_line_1 = None
-        self.patient.save(update_fields=["address_line_1", "updated_at"])
+    def test_validate_not_ready_missing_medicaid_id(self):
+        """Missing medicaid_member_id must make the claim NOT ready — never fabricated."""
+        self.patient.medicaid_member_id = ""
+        self.patient.save(update_fields=["medicaid_member_id", "updated_at"])
         response = self.client.post(
             reverse("claim-validate", kwargs={"pk": self.claim.id}),
             {},
@@ -187,7 +190,7 @@ class ClaimValidateStatusAPITests(AuthAPITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         data = response.data["data"]
         self.assertFalse(data["ready"])
-        self.assertTrue(any("demographics" in e.lower() for e in data["errors"]))
+        self.assertTrue(any("medicaid_member_id" in e.lower() for e in data["errors"]))
 
     def test_validate_long_distance_needs_docs(self):
         self.trip.one_way_miles = Decimal("78.00")

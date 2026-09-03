@@ -8,7 +8,10 @@ class Patient(BaseModel):
     first_name = models.CharField(max_length=255)
     last_name = models.CharField(max_length=255)
     email = models.EmailField(max_length=255, blank=True, null=True)
-    date_of_birth = models.DateField()
+    # DOB is optional for Colorado NEMT 837P billing — the critical identifier
+    # is the Colorado Medicaid Member ID (NM1*IL MI).  When present, DOB is
+    # included in the DMG segment.  Never fabricate a value.
+    date_of_birth = models.DateField(null=True, blank=True)
     gender = models.CharField(
         max_length=1,
         choices=Gender.choices,
@@ -33,11 +36,12 @@ class Patient(BaseModel):
         return f"{self.first_name} {self.last_name}"
 
     def has_837p_demographics(self):
-        """Minimum subscriber demographics for a basic 837P NM1/N3/N4/DMG path."""
-        return bool(
-            self.gender
-            and self.address_line_1
-            and self.city
-            and self.state
-            and self.zip
-        )
+        """
+        Return True when the patient has the minimum data for a Colorado 837P.
+
+        Per Colorado Medicaid NEMT billing requirements the *only* mandatory
+        member identifier is the Colorado Medicaid Member ID (NM1*IL MI).
+        Address / DOB / gender are optional — they are emitted when present
+        but must never be fabricated.
+        """
+        return bool((self.medicaid_member_id or "").strip())
