@@ -93,12 +93,6 @@ def _validate_provider(provider, claim_label: str) -> list[str]:
     errors = []
     is_atypical = bool(getattr(provider, "is_atypical", False))
 
-    if not (provider.taxonomy_code or "").strip():
-        errors.append(
-            f"{claim_label}: provider {provider.id} is missing taxonomy_code "
-            "(required for Colorado 837P billing provider identity)."
-        )
-
     if is_atypical:
         medicaid_pid = (getattr(provider, "medicaid_provider_id", None) or "").strip()
         if not medicaid_pid:
@@ -113,6 +107,11 @@ def _validate_provider(provider, claim_label: str) -> list[str]:
                 "an NPI set. Atypical providers must not have an NPI — never fabricate one."
             )
     else:
+        if not (provider.taxonomy_code or "").strip():
+            errors.append(
+                f"{claim_label}: provider {provider.id} is missing taxonomy_code "
+                "(required for standard NPI billing provider identity)."
+            )
         npi = (provider.npi or "").strip()
         if not npi:
             errors.append(
