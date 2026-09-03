@@ -44,6 +44,7 @@ class PatientSerializer(serializers.ModelSerializer):
         required=False, allow_blank=True, allow_null=True
     )
     date_of_birth = serializers.DateField(required=False, allow_null=True)
+    county = serializers.CharField(required=False, allow_blank=True, allow_null=True)
 
     class Meta:
         model = Patient
@@ -64,7 +65,7 @@ class PatientSerializer(serializers.ModelSerializer):
         return value.upper()
 
     def validate_county(self, value):
-        return clean_required_text(value, "county")
+        return clean_optional_text(value)
 
     def validate_gender(self, value):
         if value in (None, ""):
