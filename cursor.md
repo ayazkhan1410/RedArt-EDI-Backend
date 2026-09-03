@@ -1,21 +1,25 @@
 # RedArt EDI Backend — Cursor Developer Guide
 
 > **How to start a new Cursor session:**  
-> Open a new chat and say: *"Read `cursor.md` and `docs/HANDOFF.md`, then help me with [your task]."*
+> Open a new chat and say: *"Read* `cursor.md` *and* `docs/HANDOFF.md`*, then help me with [your task]."*
 
 ---
 
 ## Project at a glance
 
-| Item | Detail |
-|------|--------|
-| Branch | `Ayaz/local-main` |
-| Repo | https://github.com/ayazkhan1410/RedArt-EDI-Backend |
-| API base | `http://127.0.0.1:7000/api/v1/` *(local dev only — replace with deployed HTTPS base URL in TEST/PROD)* |
-| Swagger | `http://127.0.0.1:7000/api/docs/` *(local dev only — deployed docs URL will be different)* |
-| Health | `GET /api/health/` |
+
+| Item     | Detail                                                                                                   |
+| -------- | -------------------------------------------------------------------------------------------------------- |
+| Branch   | `Ayaz/local-main`                                                                                        |
+| Repo     | [https://github.com/ayazkhan1410/RedArt-EDI-Backend](https://github.com/ayazkhan1410/RedArt-EDI-Backend) |
+| API base | `http://127.0.0.1:7000/api/v1/` *(local dev only — replace with deployed HTTPS base URL in TEST/PROD)*   |
+| Swagger  | `http://127.0.0.1:7000/api/docs/` *(local dev only — deployed docs URL will be different)*               |
+| Health   | `GET /api/health/`                                                                                       |
+
 
 ---
+
+
 
 ## 1. First-time setup
 
@@ -37,6 +41,8 @@ docker compose exec backend python manage.py seed_demo_data
 ```
 
 ---
+
+
 
 ## 2. Daily commands
 
@@ -72,6 +78,8 @@ docker compose exec backend python manage.py showmigrations
 
 ---
 
+
+
 ## 3. Project structure
 
 ```
@@ -102,31 +110,43 @@ docs/
 
 ---
 
+
+
 ## 4. Key files you will touch
 
-| File | What it does |
-|------|-------------|
-| `apps/edi/utils/schema.py` | Builds X12 837P segment list from payload dict |
-| `apps/edi/utils/readiness.py` | Pre-flight validation before 837P generation |
-| `apps/edi/utils/handler.py` | Orchestrates 837P generation → file → status update |
-| `apps/edi/utils/service.py` | EDI service helpers (control numbers, ack, 835) |
-| `apps/claim/utils/service.py` | Claim creation, validation, document sync |
-| `apps/claim/choices.py` | `ClaimStatus`, `BatchStatus`, attachment choices |
-| `apps/provider_billing_profile/models.py` | Provider model (NPI vs atypical) |
-| `apps/patient/models.py` | Patient model (`medicaid_member_id` is key) |
-| `redartdigital/api_v1_urls.py` | **Only place** to wire new API routes |
+
+| File                                      | What it does                                        |
+| ----------------------------------------- | --------------------------------------------------- |
+| `apps/edi/utils/schema.py`                | Builds X12 837P segment list from payload dict      |
+| `apps/edi/utils/readiness.py`             | Pre-flight validation before 837P generation        |
+| `apps/edi/utils/handler.py`               | Orchestrates 837P generation → file → status update |
+| `apps/edi/utils/service.py`               | EDI service helpers (control numbers, ack, 835)     |
+| `apps/claim/utils/service.py`             | Claim creation, validation, document sync           |
+| `apps/claim/choices.py`                   | `ClaimStatus`, `BatchStatus`, attachment choices    |
+| `apps/provider_billing_profile/models.py` | Provider model (NPI vs atypical)                    |
+| `apps/patient/models.py`                  | Patient model (`medicaid_member_id` is key)         |
+| `redartdigital/api_v1_urls.py`            | **Only place** to wire new API routes               |
+
 
 ---
 
+
+
 ## 5. Enterprise invariants — never violate these
 
+
+
 ### Zero fabrication
+
 - **Never** default a missing `procedure_code` to anything — raise a validation error.
 - **Never** fabricate NPI, SSN, DOB, gender, ZIP, or `medicaid_member_id`.
 - `medicaid_member_id` is the **only** mandatory patient identifier for Colorado NEMT 837P.
 - `date_of_birth` / gender / address are **optional** — emit in DMG/N3/N4 only when present.
 
+
+
 ### Provider types
+
 ```python
 # Standard NPI provider (is_atypical=False):
 NM108 = "XX", NM109 = provider.npi
@@ -137,27 +157,40 @@ NM108 = "1C", NM109 = provider.medicaid_provider_id
 # No REF*EI, no NPI
 ```
 
+
+
 ### ISA fixed length
+
 The ISA segment must be **exactly 106 characters**. The schema builder enforces this and raises immediately if the length is wrong.
 
 ### TEST vs PRODUCTION
+
 - `ISA15 = "T"` for TEST, `ISA15 = "P"` for PRODUCTION — always set via the batch's environment.
 - Never hard-code `P` or `T` anywhere.
 
+
+
 ### Claim status lifecycle
+
 ```
 DRAFT → READY_FOR_837P → EDI_GENERATED → EDI_SENT → EDI_ACCEPTED → PAID
                                                    ↘ EDI_REJECTED
 ```
+
 - `EDI_GENERATED` = file generated, **not yet uploaded**.
 - `EDI_SENT` = uploaded to HCPF.
 - `EDI_REJECTED` = 999/TA1 came back rejected; claim needs correction.
 - Terminal states `PAID` and `DENIED` are **never overwritten** by later ACKs.
 
+
+
 ### No company data in source code
+
 All company names, NPIs, addresses, phone numbers, and credentials must come from the **database** (set via API). The `seed_demo_data` management command uses only clearly synthetic placeholders.
 
 ---
+
+
 
 ## 6. Adding a new provider / company (no code change needed)
 
@@ -189,6 +222,8 @@ POST /api/v1/provider-billing-profiles/
 
 ---
 
+
+
 ## 7. Onboarding an atypical provider (no NPI)
 
 ```json
@@ -204,6 +239,8 @@ POST /api/v1/provider-billing-profiles/
 The 837P generator will automatically use `NM108=1C, NM109=CO12345678` and omit `REF*EI`.
 
 ---
+
+
 
 ## 8. Full billing workflow (API calls in order)
 
@@ -224,6 +261,8 @@ The 837P generator will automatically use `NM108=1C, NM109=CO12345678` and omit 
 
 ---
 
+
+
 ## 9. Running tests
 
 ```bash
@@ -241,6 +280,8 @@ docker compose exec backend python manage.py test apps.claim
 ```
 
 ---
+
+
 
 ## 10. Environment variables (important ones)
 
@@ -276,6 +317,8 @@ Do **not** add `EDI_DEFAULT_BILLING_TAX_ID` — it was removed. Tax IDs are now 
 
 ---
 
+
+
 ## 11. Migrations — important rules
 
 - **Never** run or apply migrations without first reviewing the migration file.
@@ -284,20 +327,26 @@ Do **not** add `EDI_DEFAULT_BILLING_TAX_ID` — it was removed. Tax IDs are now 
 - Migrations are numbered sequentially per app — do not reorder them.
 
 Current latest migrations:
+
 - `claim/0007_claim_status_edi_generated_and_rejected`
 - `patient/0003_patient_dob_nullable`
 - `provider_billing_profile/0003_provider_is_atypical_and_tax_id`
 
 ---
 
+
+
 ## 12. Remaining work (DevOps / Client)
 
-| Task | Owner |
-|------|-------|
-| Deploy TEST API URL (public HTTPS) | DevOps |
-| Configure SFTP credentials for TEST HCPF | DevOps |
-| Live 837P TEST → confirm 999 + Edifecs | DevOps / HCPF |
-| Wire RedArt backend to this EDI API | Client (Wahab) |
-| Map RedArt bill/trip fields to EDI payloads | Client |
-| Display validation/status in RedArt UI | Client |
-| Confirm HCPF attachment channel | Client / HCPF |
+
+| Task                                        | Owner          |
+| ------------------------------------------- | -------------- |
+| Deploy TEST API URL (public HTTPS)          | DevOps         |
+| Configure SFTP credentials for TEST HCPF    | DevOps         |
+| Live 837P TEST → confirm 999 + Edifecs      | DevOps / HCPF  |
+| Wire RedArt backend to this EDI API         | Client (Wahab) |
+| Map RedArt bill/trip fields to EDI payloads | Client         |
+| Display validation/status in RedArt UI      | Client         |
+| Confirm HCPF attachment channel             | Client / HCPF  |
+
+
