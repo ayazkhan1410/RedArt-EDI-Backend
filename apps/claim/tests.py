@@ -70,6 +70,7 @@ class ClaimServiceTests(ClaimFixturesMixin, TestCase):
             external_id="TRIP-1001",
             diagnosis_code="R68.89",
             place_of_service="41",
+            procedure_code="A0100",
         )
         self.assertEqual(claim.status, ClaimStatus.DOCUMENTS_REQUIRED)
         self.assertTrue(claim.attachment_required)

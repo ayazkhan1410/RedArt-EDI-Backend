@@ -240,6 +240,23 @@ def create_edi_file_for_batch(
         batch.status = BatchStatus.GENERATED
         batch.save(update_fields=["status", "updated_at"])
 
+    # Advance claim status: READY_FOR_837P → EDI_GENERATED
+    # "837P generated ≠ uploaded" — per client requirement.
+    if edi_file.batch_id:
+        claim_ids = BatchClaim.objects.filter(
+            batch_id=edi_file.batch_id,
+            is_active=True,
+            claim_id__isnull=False,
+        ).values_list("claim_id", flat=True)
+        Claim.objects.filter(
+            id__in=claim_ids,
+            is_active=True,
+            status__in=(
+                ClaimStatus.READY_FOR_837P,
+                ClaimStatus.DOCUMENTS_COMPLETE,
+            ),
+        ).update(status=ClaimStatus.EDI_GENERATED, updated_at=timezone.now())
+
     return edi_file
 
 
@@ -274,7 +291,9 @@ def mark_edi_file_uploaded(edi_file_id, *, path_or_blob_ref=None, file_hash=None
         batch.status = BatchStatus.SUBMITTED
         batch.save(update_fields=["status", "updated_at"])
 
-    # Business claim status: READY_FOR_837P → EDI_SENT (transport still on EDIFile).
+    # Business claim status: EDI_GENERATED → EDI_SENT (= uploaded to HCPF).
+    # Also accepts READY_FOR_837P / DOCUMENTS_COMPLETE for backward compat with
+    # flows that did not pass through the EDI_GENERATED intermediate state.
     if edi_file.batch_id:
         claim_ids = BatchClaim.objects.filter(
             batch_id=edi_file.batch_id,
@@ -287,6 +306,7 @@ def mark_edi_file_uploaded(edi_file_id, *, path_or_blob_ref=None, file_hash=None
             status__in=(
                 ClaimStatus.READY_FOR_837P,
                 ClaimStatus.DOCUMENTS_COMPLETE,
+                ClaimStatus.EDI_GENERATED,
             ),
         ).update(status=ClaimStatus.EDI_SENT, updated_at=timezone.now())
 
@@ -390,7 +410,7 @@ def apply_edi_acknowledgement(
     )
 
     updated_claim_ids = []
-    if apply_claim_status and status == AcknowledgementStatus.ACCEPTED and st02:
+    if apply_claim_status and st02:
         row = (
             BatchClaim.objects.select_related("claim")
             .filter(batch_id=batch.id, st02=st02, is_active=True)
@@ -406,14 +426,25 @@ def apply_edi_acknowledgement(
             )
         claim = row.claim if row else None
         if claim and claim.is_active:
-            if claim.status not in (
-                ClaimStatus.PAID,
-                ClaimStatus.DENIED,
-                ClaimStatus.UNDER_REVIEW,
-            ):
-                claim.status = ClaimStatus.EDI_ACCEPTED
-                claim.save(update_fields=["status", "updated_at"])
-                updated_claim_ids.append(claim.id)
+            # Terminal states are never overwritten by acknowledgement signals.
+            terminal = (ClaimStatus.PAID, ClaimStatus.DENIED)
+            if claim.status not in terminal:
+                if status == AcknowledgementStatus.ACCEPTED:
+                    # 999 ACCEPTED → EDI_ACCEPTED (never jumps directly to PAID).
+                    claim.status = ClaimStatus.EDI_ACCEPTED
+                    claim.save(update_fields=["status", "updated_at"])
+                    updated_claim_ids.append(claim.id)
+                elif status in (
+                    AcknowledgementStatus.REJECTED,
+                    AcknowledgementStatus.ERROR,
+                ):
+                    # 999 REJECTED / ERROR → EDI_REJECTED so RedArt knows
+                    # this claim needs correction before resubmission.
+                    claim.status = ClaimStatus.EDI_REJECTED
+                    claim.save(update_fields=["status", "updated_at"])
+                    updated_claim_ids.append(claim.id)
+                # PARTIAL / ACCEPTED_WITH_ERRORS — leave status as-is for now;
+                # the payer's 277 will carry the authoritative adjudication.
 
     if status == AcknowledgementStatus.ACCEPTED:
         if edi_file and edi_file.status in (

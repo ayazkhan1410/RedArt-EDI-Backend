@@ -77,7 +77,7 @@ class PatientAPITests(AuthAPITestCase):
 
     def test_soft_delete(self):
         patient = Patient.objects.create(
-            first_name="Sara",
+            first_name="SAMPLE",
             last_name="Ali",
             date_of_birth="1990-01-01",
             medicaid_member_id="M555",

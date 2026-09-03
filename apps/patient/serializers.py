@@ -43,6 +43,7 @@ class PatientSerializer(serializers.ModelSerializer):
     gender = serializers.CharField(
         required=False, allow_blank=True, allow_null=True
     )
+    date_of_birth = serializers.DateField(required=False, allow_null=True)
 
     class Meta:
         model = Patient
@@ -98,8 +99,10 @@ class PatientSerializer(serializers.ModelSerializer):
         return clean_optional_text(value)
 
     def validate_date_of_birth(self, value):
+        # DOB is optional for Colorado NEMT billing.  When provided it must
+        # be a valid past date.  Never fabricate a value on behalf of the caller.
         if value is None:
-            raise serializers.ValidationError("date_of_birth is required.")
+            return value
         if value > date.today():
             raise serializers.ValidationError("date_of_birth cannot be in the future.")
         return value
