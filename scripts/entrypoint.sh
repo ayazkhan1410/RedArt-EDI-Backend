@@ -186,7 +186,7 @@ configure_hcpf_sftp() {
     return 0
   fi
   echo "[entrypoint] Configuring HCPF Edifecs production SFTP ..."
-  python scripts/wire_hcpf_sftp.py
+  PYTHONPATH=/app python scripts/wire_hcpf_sftp.py
 }
 
 ensure_superuser() {
