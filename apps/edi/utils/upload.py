@@ -16,7 +16,7 @@ from apps.edi.choices import (
     TransferChannel,
     TransferLogStatus,
 )
-from apps.edi.models import EDIFile, EDIFileTransferLog, SFTPDirectory
+from apps.edi.models import EDIFile, EDIFileTransferLog, SFTPCredentials, SFTPDirectory
 from apps.edi.utils.s3_client import upload_bytes_to_s3
 from apps.edi.utils.sftp_client import upload_bytes_via_sftp
 from apps.edi.utils.service import mark_edi_file_uploaded
@@ -47,7 +47,28 @@ def resolve_outbound_directory(*, trading_partner_id=None, credentials_id=None):
             qs = qs.filter(credentials_id=credentials_id)
         directory = qs.order_by("-id").first()
     if directory is None:
-        raise ValueError("No active SFTP directory configured for upload.")
+        # Self-heal the production row from the active Render-managed Edifecs
+        # credential. The credential is securely seeded at every web startup.
+        credentials = SFTPCredentials.objects.filter(
+            is_active=True,
+            host="sftp.mft.edifecsfedcloud.com",
+            environment="PRODUCTION",
+        )
+        if credentials_id:
+            credentials = credentials.filter(pk=credentials_id)
+        credential = credentials.order_by("-id").first()
+        if credential is None:
+            raise ValueError("No active Edifecs SFTP credential configured for upload.")
+        directory, _ = SFTPDirectory.objects.update_or_create(
+            credentials=credential,
+            purpose=SFTPDirectoryPurpose.OUTBOUND_837P,
+            defaults={
+                "name": "HCPF 837P production send",
+                "sending_path": "Outgoing/edifecs.stco.hosted/toedifecs",
+                "receiving_path": "Organizational/Incoming/fromedifecs/edifecs.stco.hosted",
+                "is_active": True,
+            },
+        )
     return directory
 
 
