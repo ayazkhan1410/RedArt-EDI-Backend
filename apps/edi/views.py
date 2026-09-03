@@ -50,7 +50,7 @@ from apps.edi.utils.service import (
     create_edi_file_for_batch,
     mark_edi_file_uploaded,
 )
-from apps.edi.utils.upload import queue_edi_file_upload, read_edi_file_bytes
+from apps.edi.utils.upload import queue_edi_file_upload, run_edi_file_upload, read_edi_file_bytes
 
 logger = logging.getLogger(__name__)
 
@@ -778,25 +778,26 @@ class EDIFileQueueUploadAPIView(APIView):
                 edi_file_id=source_file.pk,
                 credentials_id=credentials_id,
             )
-            async_result = upload_edi_file.delay(
-                edi_file.id,
-                attempt,
-                credentials_id,
+            # Render's free web service has no background worker. Run the
+            # already-created transport attempt here so a successful API response
+            # means the file has actually reached the trading partner.
+            result = run_edi_file_upload(
+                edi_file_id=edi_file.id,
+                attempt=attempt,
+                credentials_id=credentials_id,
             )
-            for log in (sftp_log, s3_log):
-                log.celery_task_id = async_result.id
-                log.save(update_fields=["celery_task_id", "updated_at"])
 
             return success_response(
-                "EDI file upload queued.",
+                "EDI file upload completed.",
                 data={
                     "id": edi_file.id,
-                    "status": edi_file.status,
+                    "status": result["status"],
                     "attempt": attempt,
-                    "celery_task_id": async_result.id,
+                    "sftp_path": result.get("sftp_path"),
+                    "s3_uri": result.get("s3_uri"),
                     "transfer_log_ids": [sftp_log.id, s3_log.id],
                 },
-                status_code=status.HTTP_202_ACCEPTED,
+                status_code=status.HTTP_200_OK,
             )
         except ValueError as exc:
             return error_response(client_error_message(exc), status_code=status.HTTP_400_BAD_REQUEST)
