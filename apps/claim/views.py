@@ -352,6 +352,7 @@ class ClaimFromTripAPIView(APIView):
                 place_of_service=data.get("place_of_service"),
                 procedure_code=data.get("procedure_code"),
                 create_service_line=data.get("create_service_line", True),
+                service_lines=data.get("service_lines"),
             )
             payload = {"id": claim.id}
             if line is not None:
