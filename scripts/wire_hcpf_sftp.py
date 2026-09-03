@@ -35,13 +35,16 @@ def main():
     if "BEGIN" not in pem or "PRIVATE KEY" not in pem:
         raise SystemExit("Edifecs secret file does not look like a PEM private key")
 
-    partner = (
-        TradingPartner.objects.filter(sender_id="89513013", is_active=True)
-        .order_by("-id")
-        .first()
+    partner, _ = TradingPartner.objects.update_or_create(
+        sender_id="89513013",
+        receiver_id="COMEDASSISTPROG",
+        environment="PRODUCTION",
+        defaults={
+            "name": "RedArt Digital — Health First Colorado",
+            "contact_name": "Wahab Mirza",
+            "is_active": True,
+        },
     )
-    if partner is None:
-        raise SystemExit("Active RedArt trading partner 89513013 was not found")
 
     cred, created = SFTPCredentials.objects.update_or_create(
         name="HCPF-MFT-EDIFECS",
