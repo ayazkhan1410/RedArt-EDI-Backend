@@ -140,6 +140,7 @@ class EDIFile(BaseModel):
     filename = models.CharField(max_length=255, null=True, blank=True)
     file_hash = models.CharField(max_length=128, null=True, blank=True)
     path_or_blob_ref = models.CharField(max_length=1024, null=True, blank=True)
+    content = models.TextField(null=True, blank=True)
     status = models.CharField(
         max_length=32,
         choices=EDIFileStatus.choices,
