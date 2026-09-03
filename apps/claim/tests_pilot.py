@@ -18,8 +18,8 @@ class LongDistancePilotAPITests(AttachmentWorkflowAPITests):
     def setUp(self):
         super().setUp()
         self.partner = TradingPartner.objects.create(
-            name="Colorado Medicaid",
-            sender_id="89513013",
+            name="Test Transport LLC",
+            sender_id="SMPLSENDER1",
             receiver_id="COMEDASSISTPROG",
             environment="TEST",
         )
