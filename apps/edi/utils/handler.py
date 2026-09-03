@@ -210,6 +210,7 @@ class Generate837PHandler:
             filename=filename,
             file_hash=digest,
             path_or_blob_ref=relative_path,
+            content=body,
             status=EDIFileStatus.GENERATED,
             is_active=True,
         )
