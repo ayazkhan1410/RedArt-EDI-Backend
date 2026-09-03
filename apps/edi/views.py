@@ -50,7 +50,8 @@ from apps.edi.utils.service import (
     create_edi_file_for_batch,
     mark_edi_file_uploaded,
 )
-from apps.edi.utils.upload import queue_edi_file_upload
+from apps.edi.utils.s3_client import upload_bytes_to_s3
+from apps.edi.utils.upload import queue_edi_file_upload, read_edi_file_bytes
 
 logger = logging.getLogger(__name__)
 
@@ -763,6 +764,20 @@ class EDIFileQueueUploadAPIView(APIView):
             if not serializer.is_valid():
                 return error_response("Validation failed.", errors=serializer.errors)
             credentials_id = serializer.validated_data.get("credentials_id")
+            # Railway's web and worker services do not share ephemeral disks.
+            # Stage the generated file in object storage before queueing so the
+            # worker can always read the same bytes without putting PHI on the
+            # Celery broker message.
+            source_file = EDIFile.objects.get(pk=pk, is_active=True)
+            source_data = read_edi_file_bytes(source_file)
+            source_key = (
+                f"edi/837p/{source_file.batch_id or 'unknown'}/"
+                f"{source_file.filename}"
+            )
+            source_uri = upload_bytes_to_s3(key=source_key, data=source_data)
+            EDIFile.objects.filter(pk=source_file.pk).update(
+                path_or_blob_ref=source_uri
+            )
             edi_file, attempt, sftp_log, s3_log = queue_edi_file_upload(
                 edi_file_id=pk,
                 credentials_id=credentials_id,
