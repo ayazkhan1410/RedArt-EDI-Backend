@@ -32,6 +32,8 @@ services:
         value: "true"
       - key: RUN_MIGRATE_ON_START
         value: "true"
+      - key: CELERY_TASK_ALWAYS_EAGER
+        value: "true"
       - key: DJANGO_SECURE_SSL_REDIRECT
         value: "true"
       - key: API_REQUIRE_AUTH
@@ -85,49 +87,6 @@ services:
       - key: EDI_API_SERVICE_PASSWORD
         sync: false
 
-  - type: worker
-    name: redart-edi-worker
-    runtime: docker
-    plan: free
-    dockerfilePath: ./Dockerfile
-    dockerCommand: worker
-    envVars:
-      - key: DJANGO_SETTINGS_MODULE
-        value: redartdigital.settings.production
-      - key: POSTGRES_HOST
-        fromDatabase:
-          name: edi-postgres
-          property: host
-      - key: POSTGRES_PORT
-        fromDatabase:
-          name: edi-postgres
-          property: port
-      - key: POSTGRES_DB
-        fromDatabase:
-          name: edi-postgres
-          property: database
-      - key: POSTGRES_USER
-        fromDatabase:
-          name: edi-postgres
-          property: user
-      - key: POSTGRES_PASSWORD
-        fromDatabase:
-          name: edi-postgres
-          property: password
-      - key: POSTGRES_SSLMODE
-        value: require
-      - key: CELERY_BROKER_URL
-        fromService:
-          name: edi-redis
-          type: redis
-          property: connectionString
-      - key: CELERY_RESULT_BACKEND
-        fromService:
-          name: edi-redis
-          type: redis
-          property: connectionString
-      - key: DJANGO_SECRET_KEY
-        fromService:
-          name: redart-edi-api
-          type: web
-          envVarKey: DJANGO_SECRET_KEY
+# A separate worker is omitted from this free-plan test Blueprint.
+# Production should restore a paid worker service for continuous SFTP polling.
+
