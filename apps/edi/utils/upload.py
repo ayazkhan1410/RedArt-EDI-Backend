@@ -36,15 +36,15 @@ def resolve_outbound_directory(*, trading_partner_id=None, credentials_id=None):
         qs = qs.filter(credentials__trading_partner_id=trading_partner_id)
     directory = qs.order_by("-id").first()
     if directory is None:
-        # Fall back to GENERAL send/recv seed row.
+        # Fall back to the shared active HCPF transport. A provider-specific
+        # trading-partner row is not required because one platform MFT account
+        # carries files for every authorised client company.
         qs = SFTPDirectory.objects.with_relations().filter(
             is_active=True,
             credentials__is_active=True,
         )
         if credentials_id:
             qs = qs.filter(credentials_id=credentials_id)
-        elif trading_partner_id:
-            qs = qs.filter(credentials__trading_partner_id=trading_partner_id)
         directory = qs.order_by("-id").first()
     if directory is None:
         raise ValueError("No active SFTP directory configured for upload.")
