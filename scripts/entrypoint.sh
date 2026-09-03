@@ -179,6 +179,16 @@ ensure_api_service_user() {
     || echo "[entrypoint] WARNING: create_api_service_user failed"
 }
 
+configure_hcpf_sftp() {
+  local key_path="${HCPF_SFTP_PRIVATE_KEY_PATH:-/etc/secrets/edifecs_sftp_private_key.pem}"
+  if [[ ! -f "${key_path}" ]]; then
+    echo "[entrypoint] Edifecs SFTP secret not present; skipping production SFTP configuration."
+    return 0
+  fi
+  echo "[entrypoint] Configuring HCPF Edifecs production SFTP ..."
+  python scripts/wire_hcpf_sftp.py
+}
+
 ensure_superuser() {
   if [[ -z "${DJANGO_SUPERUSER_USERNAME:-}" ]]; then
     return 0
@@ -228,6 +238,7 @@ if [[ "${ROLE}" == "web" ]]; then
   setup_celery_beat_schedules
   ensure_superuser
   ensure_api_service_user
+  configure_hcpf_sftp
   # collectstatic only needed for Gunicorn + WhiteNoise
   if [[ "${USE_GUNICORN:-false}" == "true" ]]; then
     echo "[entrypoint] Collecting static files ..."
