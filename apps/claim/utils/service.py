@@ -548,6 +548,7 @@ def create_claim_from_trip(
     place_of_service=None,
     procedure_code=None,
     create_service_line=True,
+    service_lines=None,
 ):
     """
     Create a claim (and optional demo service line) from an existing trip.
@@ -573,7 +574,26 @@ def create_claim_from_trip(
     claim.save()
 
     line = None
-    if create_service_line:
+    if service_lines:
+        for item in service_lines:
+            modifiers = item.get("modifiers") or []
+            created = ClaimServiceLine.objects.create(
+                claim=claim,
+                procedure_code=item.get("procedure_code"),
+                modifier_1=modifiers[0] if len(modifiers) > 0 else None,
+                modifier_2=modifiers[1] if len(modifiers) > 1 else None,
+                modifier_3=modifiers[2] if len(modifiers) > 2 else None,
+                modifier_4=modifiers[3] if len(modifiers) > 3 else None,
+                from_date=trip.service_date,
+                to_date=trip.service_date,
+                units=item.get("units"),
+                mileage=item.get("mileage"),
+                charge=item.get("charge"),
+                is_active=True,
+            )
+            if line is None:
+                line = created
+    elif create_service_line:
         line = ClaimServiceLine.objects.create(
             claim=claim,
             procedure_code=procedure_code,
