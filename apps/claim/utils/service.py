@@ -546,7 +546,7 @@ def create_claim_from_trip(
     external_id=None,
     diagnosis_code=None,
     place_of_service=None,
-    procedure_code="A0100",
+    procedure_code=None,
     create_service_line=True,
 ):
     """

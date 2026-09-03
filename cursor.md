@@ -11,8 +11,8 @@
 |------|--------|
 | Branch | `Ayaz/local-main` |
 | Repo | https://github.com/ayazkhan1410/RedArt-EDI-Backend |
-| API base | `http://127.0.0.1:7000/api/v1/` |
-| Swagger | `http://127.0.0.1:7000/api/docs/` |
+| API base | `http://127.0.0.1:7000/api/v1/` *(local dev only — replace with deployed HTTPS base URL in TEST/PROD)* |
+| Swagger | `http://127.0.0.1:7000/api/docs/` *(local dev only — deployed docs URL will be different)* |
 | Health | `GET /api/health/` |
 
 ---

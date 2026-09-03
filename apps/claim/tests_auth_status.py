@@ -157,6 +157,7 @@ class ClaimValidateStatusAPITests(AuthAPITestCase):
             claim_number="TESTCLAIM-VAL-1",
             diagnosis_code="R69",
             place_of_service="03",
+            procedure_code="A0130",
         )
         self.batch = SubmissionBatch.objects.create(
             batch_number="BATCH-VAL-1",

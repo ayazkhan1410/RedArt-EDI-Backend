@@ -83,6 +83,7 @@ class EDIFixturesMixin:
             claim_number="C-EDI-1",
             diagnosis_code="R68.89",
             place_of_service="41",
+            procedure_code="A0130",
             create_service_line=True,
         )
         for doc_type, name, digest in (
