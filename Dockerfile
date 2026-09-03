@@ -19,6 +19,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 RUN apt-get -o Acquire::Check-Valid-Until=false -o Acquire::Check-Date=false update \
     && apt-get -o Acquire::Check-Valid-Until=false -o Acquire::Check-Date=false install -y --no-install-recommends \
         curl \
+        bash \
     && rm -rf /var/lib/apt/lists/*
 
 # ========
@@ -45,5 +46,6 @@ RUN chmod +x /app/scripts/entrypoint.sh /app/scripts/start.sh
 
 EXPOSE 8000
 
-ENTRYPOINT ["/app/scripts/entrypoint.sh"]
+ENTRYPOINT ["/bin/bash", "/app/scripts/entrypoint.sh"]
 CMD ["web"]
+
