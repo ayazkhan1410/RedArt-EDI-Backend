@@ -52,7 +52,6 @@ def resolve_outbound_directory(*, trading_partner_id=None, credentials_id=None):
         credentials = SFTPCredentials.objects.filter(
             is_active=True,
             host="sftp.mft.edifecsfedcloud.com",
-            environment="PRODUCTION",
         )
         if credentials_id:
             credentials = credentials.filter(pk=credentials_id)
