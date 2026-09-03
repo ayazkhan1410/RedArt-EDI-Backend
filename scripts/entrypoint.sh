@@ -5,6 +5,21 @@
 # ========
 set -euo pipefail
 
+# Decode the protected single-line Render key into an owner-only runtime file.
+if [[ -n "${HCPF_SFTP_PRIVATE_KEY_B64:-}" ]]; then
+  export HCPF_SFTP_PRIVATE_KEY_PATH="/tmp/edifecs_sftp_private_key.pem"
+  python - <<'PY'
+import base64
+import os
+from pathlib import Path
+
+target = Path(os.environ["HCPF_SFTP_PRIVATE_KEY_PATH"])
+target.write_bytes(base64.b64decode(os.environ["HCPF_SFTP_PRIVATE_KEY_B64"]))
+os.chmod(target, 0o600)
+PY
+  echo "[entrypoint] Edifecs private key prepared from protected environment."
+fi
+
 # ========
 # Wait for Postgres
 # ========
@@ -328,4 +343,3 @@ case "${ROLE}" in
     exit 1
     ;;
 esac
-
