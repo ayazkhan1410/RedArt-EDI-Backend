@@ -769,7 +769,17 @@ class EDIFileQueueUploadAPIView(APIView):
             # worker can always read the same bytes without putting PHI on the
             # Celery broker message.
             source_file = EDIFile.objects.get(pk=pk, is_active=True)
-            source_data = read_edi_file_bytes(source_file)
+            try:
+                source_data = read_edi_file_bytes(source_file)
+            except ValueError as exc:
+                if "missing on disk" not in str(exc):
+                    raise
+                # Recover legacy records created before shared staging existed.
+                # Rebuild from the saved batch and queue the new file record.
+                source_file, _payload, body = Generate837PHandler(
+                    source_file.batch_id
+                ).generate()
+                source_data = body.encode("utf-8")
             source_key = (
                 f"edi/837p/{source_file.batch_id or 'unknown'}/"
                 f"{source_file.filename}"
