@@ -19,7 +19,7 @@ class Patient(BaseModel):
         blank=True,
     )
     medicaid_member_id = models.CharField(max_length=255, unique=True)
-    county = models.CharField(max_length=255)
+    county = models.CharField(max_length=255, blank=True, null=True)
     address_line_1 = models.CharField(max_length=500, blank=True, null=True)
     address_line_2 = models.CharField(max_length=500, blank=True, null=True)
     city = models.CharField(max_length=100, blank=True, null=True)
