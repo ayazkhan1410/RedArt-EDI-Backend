@@ -56,14 +56,21 @@ def resolve_outbound_directory(*, trading_partner_id=None, credentials_id=None):
             credentials = credentials.filter(pk=credentials_id)
         credential = credentials.order_by("-id").first()
         if credential is None:
-            key_path = Path(
-                os.environ.get(
-                    "HCPF_SFTP_PRIVATE_KEY_PATH",
-                    "/etc/secrets/edifecs_sftp_private_key.pem",
-                )
+            configured_key_path = os.environ.get("HCPF_SFTP_PRIVATE_KEY_PATH")
+            key_candidates = [
+                Path(configured_key_path) if configured_key_path else None,
+                Path("/etc/secrets/edifecs_sftp_private_key.pem"),
+                Path("/app/edifecs_sftp_private_key.pem"),
+                Path.cwd() / "edifecs_sftp_private_key.pem",
+            ]
+            key_path = next(
+                (path for path in key_candidates if path is not None and path.is_file()),
+                None,
             )
-            if not key_path.is_file():
-                raise ValueError("The Render Edifecs private key is not mounted.")
+            if key_path is None:
+                raise ValueError(
+                    "The Render Edifecs private key is not mounted in a supported location."
+                )
             credential = SimpleNamespace(
                 host="sftp.mft.edifecsfedcloud.com",
                 port=22,
