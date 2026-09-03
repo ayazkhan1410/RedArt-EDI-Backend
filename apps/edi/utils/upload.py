@@ -56,28 +56,31 @@ def resolve_outbound_directory(*, trading_partner_id=None, credentials_id=None):
             credentials = credentials.filter(pk=credentials_id)
         credential = credentials.order_by("-id").first()
         if credential is None:
-            configured_key_path = os.environ.get("HCPF_SFTP_PRIVATE_KEY_PATH")
-            key_candidates = [
-                Path(configured_key_path) if configured_key_path else None,
-                Path("/etc/secrets/edifecs_sftp_private_key.pem"),
-                Path("/app/edifecs_sftp_private_key.pem"),
-                Path.cwd() / "edifecs_sftp_private_key.pem",
-            ]
-            key_path = next(
-                (path for path in key_candidates if path is not None and path.is_file()),
-                None,
-            )
-            if key_path is None:
-                raise ValueError(
-                    "The Render Edifecs private key is not mounted in a supported location."
+            private_key_pem = os.environ.get("HCPF_SFTP_PRIVATE_KEY_PEM", "").strip()
+            if not private_key_pem:
+                configured_key_path = os.environ.get("HCPF_SFTP_PRIVATE_KEY_PATH")
+                key_candidates = [
+                    Path(configured_key_path) if configured_key_path else None,
+                    Path("/etc/secrets/edifecs_sftp_private_key.pem"),
+                    Path("/app/edifecs_sftp_private_key.pem"),
+                    Path.cwd() / "edifecs_sftp_private_key.pem",
+                ]
+                key_path = next(
+                    (path for path in key_candidates if path is not None and path.is_file()),
+                    None,
                 )
+                if key_path is None:
+                    raise ValueError(
+                        "The Render Edifecs private key is unavailable."
+                    )
+                private_key_pem = key_path.read_text(encoding="utf-8")
             credential = SimpleNamespace(
                 host="sftp.mft.edifecsfedcloud.com",
                 port=22,
                 username="mft_task_01fce47a-0498-4fb4-wt4m",
                 auth_type="PRIVATE_KEY",
                 password=None,
-                private_key_pem=key_path.read_text(encoding="utf-8"),
+                private_key_pem=private_key_pem,
                 private_key_passphrase=None,
                 host_fingerprint="SHA256:xhCbKNBog9ztBEubwfUfb1ODz8e/azOlVeaVb77ug8Q",
                 timeout_seconds=45,
