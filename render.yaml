@@ -23,7 +23,6 @@ services:
     runtime: docker
     plan: free
     dockerfilePath: ./Dockerfile
-    dockerCommand: web
     healthCheckPath: /api/health/
     envVars:
       - key: DJANGO_SETTINGS_MODULE
