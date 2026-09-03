@@ -42,10 +42,10 @@ COPY . /app
 # ========
 # Entrypoint
 # ========
-RUN chmod +x /app/scripts/entrypoint.sh /app/scripts/start.sh
+RUN sed -i 's/\r$//' /app/scripts/entrypoint.sh /app/scripts/start.sh \
+    && chmod +x /app/scripts/entrypoint.sh /app/scripts/start.sh
 
 EXPOSE 8000
 
 ENTRYPOINT ["/bin/bash", "/app/scripts/entrypoint.sh"]
 CMD ["web"]
-
