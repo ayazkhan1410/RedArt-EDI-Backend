@@ -246,19 +246,19 @@ case "${ROLE}" in
       if [[ "${AUTO_RELOAD:-false}" == "true" ]]; then
         echo "[entrypoint] Starting Gunicorn with --reload ..."
         exec gunicorn redartdigital.wsgi:application \
-          --bind 0.0.0.0:8000 \
+          --bind "0.0.0.0:${PORT:-8000}" \
           --workers "${GUNICORN_WORKERS:-3}" \
           --timeout "${GUNICORN_TIMEOUT:-120}" \
           --reload
       fi
       echo "[entrypoint] Starting Gunicorn ..."
       exec gunicorn redartdigital.wsgi:application \
-        --bind 0.0.0.0:8000 \
+        --bind "0.0.0.0:${PORT:-8000}" \
         --workers "${GUNICORN_WORKERS:-3}" \
         --timeout "${GUNICORN_TIMEOUT:-120}"
     else
       echo "[entrypoint] Starting Django runserver (auto-reload on) ..."
-      exec python manage.py runserver 0.0.0.0:8000
+      exec python manage.py runserver "0.0.0.0:${PORT:-8000}"
     fi
     ;;
   worker)
@@ -317,3 +317,4 @@ case "${ROLE}" in
     exit 1
     ;;
 esac
+
