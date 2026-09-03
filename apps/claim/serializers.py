@@ -207,6 +207,9 @@ class CreateClaimFromTripSerializer(serializers.Serializer):
         required=False, allow_blank=True, allow_null=True
     )
     create_service_line = serializers.BooleanField(required=False, default=True)
+    service_lines = serializers.ListField(
+        child=serializers.DictField(), required=False, allow_empty=False
+    )
 
     def validate_claim_number(self, value):
         return clean_optional_text(value)
