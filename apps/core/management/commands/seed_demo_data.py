@@ -42,11 +42,14 @@ from apps.patient.models import Patient
 from apps.provider_billing_profile.models import ProviderBillingProfile
 from apps.trading_partner.models import TradingPartner
 
-SAMPLE_BATCH_NUMBER = "REDART-SAMPLE-837P"
-SAMPLE_CLAIM_NUMBER = "TESTCLAIM0001"
-SAMPLE_MEMBER_ID = "Y999999"
-SAMPLE_NPI = "9000211959"
-SAMPLE_SENDER = "89513013"
+# All values below are clearly synthetic / non-real.
+# No company, person, address, NPI, or credential belonging to any real entity
+# should ever appear in source code — not even as a "sample".
+SAMPLE_BATCH_NUMBER = "SAMPLE-BATCH-0001"
+SAMPLE_CLAIM_NUMBER = "SAMPLECLAIM0001"
+SAMPLE_MEMBER_ID = "SMPLMEMBER001"     # clearly fake Medicaid member ID
+SAMPLE_NPI = "1999999999"             # 10-digit test NPI (not a real NPI)
+SAMPLE_SENDER = "SMPLSENDER1"         # clearly fake sender/TPID
 
 
 class Command(BaseCommand):
@@ -190,9 +193,9 @@ class Command(BaseCommand):
             receiver_id="COMEDASSISTPROG",
             environment="TEST",
             defaults={
-                "name": "REDART LLC",
-                "contact_name": "ABDUL WAHAB MIRZA",
-                "contact_phone": "5633075734",
+                "name": "SAMPLE TRANSPORT LLC",
+                "contact_name": "BILLING CONTACT",
+                "contact_phone": "0000000000",
                 "is_active": True,
             },
         )
@@ -202,17 +205,18 @@ class Command(BaseCommand):
         obj, _ = ProviderBillingProfile.objects.update_or_create(
             npi=SAMPLE_NPI,
             defaults={
-                "legal_name": "REDART LLC",
-                "billing_name": "REDART LLC",
+                "legal_name": "SAMPLE TRANSPORT LLC",
+                "billing_name": "SAMPLE TRANSPORT LLC",
                 "taxonomy_code": "343900000X",
+                "tax_id": "000000000",  # clearly fake EIN for test only
                 "location_id": SAMPLE_NPI,
-                "address_line_1": "1276 SANDALWOOD DR APT B",
-                "city": "COLORADO SPRINGS",
+                "address_line_1": "100 SAMPLE ST",
+                "city": "DENVER",
                 "state": "CO",
-                "zip": "80918",
+                "zip": "80000",
                 "country": "US",
-                "phone": "5633075734",
-                "email": "billing@redart.example",
+                "phone": "0000000000",
+                "email": "billing@sample.example",
                 "is_active": True,
             },
         )
@@ -222,17 +226,17 @@ class Command(BaseCommand):
         obj, _ = Patient.objects.update_or_create(
             medicaid_member_id=SAMPLE_MEMBER_ID,
             defaults={
-                "first_name": "JANE",
-                "last_name": "TESTPATIENT",
-                "date_of_birth": date(1950, 1, 1),
+                "first_name": "SAMPLE",
+                "last_name": "PATIENT",
+                "date_of_birth": date(1970, 1, 1),
                 "gender": "F",
-                "county": "Pueblo",
-                "address_line_1": "100 TEST STREET",
-                "city": "PUEBLO",
+                "county": "Denver",
+                "address_line_1": "100 SAMPLE ST",
+                "city": "DENVER",
                 "state": "CO",
-                "zip": "81001",
-                "phone": "7195550100",
-                "email": "jane.testpatient@example.com",
+                "zip": "80000",
+                "phone": "0000000000",
+                "email": "sample.patient@example.com",
                 "is_active": True,
             },
         )

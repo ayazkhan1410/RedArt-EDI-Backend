@@ -14,8 +14,8 @@ from django.db import transaction
 from django.db.models import Prefetch
 from django.utils import timezone
 
-from apps.claim.choices import BatchStatus
-from apps.claim.models import BatchClaim
+from apps.claim.choices import BatchStatus, ClaimStatus
+from apps.claim.models import BatchClaim, Claim
 from apps.claim_service_line.models import ClaimServiceLine
 from apps.edi.choices import EDIFileStatus, TransactionType
 from apps.edi.models import EDIFile
@@ -135,13 +135,17 @@ class Generate837PHandler:
                     "provider": {
                         "legal_name": provider.legal_name,
                         "billing_name": provider.billing_name,
-                        "npi": provider.npi,
+                        # is_atypical controls NM108/NM109 in the 837P schema builder.
+                        "is_atypical": bool(getattr(provider, "is_atypical", False)),
+                        "npi": (provider.npi or "").strip(),
+                        # Atypical providers use medicaid_provider_id (NM108=1C).
+                        "medicaid_provider_id": (
+                            getattr(provider, "medicaid_provider_id", None) or ""
+                        ).strip(),
                         "taxonomy_code": provider.taxonomy_code,
-                        "tax_id": (
-                            getattr(provider, "tax_id", None)
-                            or getattr(settings, "EDI_DEFAULT_BILLING_TAX_ID", "")
-                            or ""
-                        ),
+                        # tax_id (EIN/TIN) — from provider record only; never from
+                        # settings or any default.  Validation rejects if missing.
+                        "tax_id": (getattr(provider, "tax_id", None) or "").strip(),
                         "address_line_1": provider.address_line_1,
                         "city": provider.city,
                         "state": provider.state,
@@ -213,6 +217,22 @@ class Generate837PHandler:
         if self.batch.status in (BatchStatus.DRAFT, BatchStatus.READY, None, ""):
             self.batch.status = BatchStatus.GENERATED
             self.batch.save(update_fields=["status", "updated_at"])
+
+        # Advance claim status: READY_FOR_837P → EDI_GENERATED
+        # "837P generated ≠ uploaded" — per client requirement.
+        claim_ids = [
+            bc.claim_id for bc in self.batch_claims if bc.claim_id is not None
+        ]
+        if claim_ids:
+            from django.utils import timezone as _tz
+            Claim.objects.filter(
+                id__in=claim_ids,
+                is_active=True,
+                status__in=(
+                    ClaimStatus.READY_FOR_837P,
+                    ClaimStatus.DOCUMENTS_COMPLETE,
+                ),
+            ).update(status=ClaimStatus.EDI_GENERATED, updated_at=_tz.now())
 
         logger.info(
             "Generated 837P edi_file_id=%s batch_id=%s path=%s segments=%s sha256=%s",

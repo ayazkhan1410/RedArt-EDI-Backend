@@ -57,9 +57,10 @@ class EDIFixturesMixin:
             phone="3035550100",
         )
         self.provider = ProviderBillingProfile.objects.create(
-            legal_name="Al Shifa",
-            billing_name="Al Shifa Transportation",
+            legal_name="Test Transport LLC",
+            billing_name="Test Transport LLC",
             npi="1234567890",
+            tax_id="123456789",  # required for REF*EI in 837P
             taxonomy_code="343900000X",
             address_line_1="100 Main St",
             city="Denver",
@@ -82,6 +83,7 @@ class EDIFixturesMixin:
             claim_number="C-EDI-1",
             diagnosis_code="R68.89",
             place_of_service="41",
+            procedure_code="A0130",
             create_service_line=True,
         )
         for doc_type, name, digest in (
@@ -161,11 +163,13 @@ class EDIServiceTests(EDIFixturesMixin, TestCase):
         self.batch.refresh_from_db()
         self.assertEqual(self.batch.status, BatchStatus.SUBMITTED)
 
-    def test_missing_patient_demographics_blocks_edi_file(self):
-        self.patient.address_line_1 = None
-        self.patient.save(update_fields=["address_line_1", "updated_at"])
-        with self.assertRaises(ValueError):
+    def test_missing_medicaid_member_id_blocks_edi_file(self):
+        """Missing medicaid_member_id must block 837P generation (not silently fabricated)."""
+        self.patient.medicaid_member_id = ""
+        self.patient.save(update_fields=["medicaid_member_id", "updated_at"])
+        with self.assertRaises(ValueError) as ctx:
             create_edi_file_for_batch(batch_id=self.batch.id)
+        self.assertIn("medicaid_member_id", str(ctx.exception).lower())
 
 
 class EDIAPITests(EDIFixturesMixin, AuthAPITestCase):
@@ -235,10 +239,13 @@ class EDIAPITests(EDIFixturesMixin, AuthAPITestCase):
 
 
 class Generate837PTests(EDIFixturesMixin, AuthAPITestCase):
-    @override_settings(EDI_DEFAULT_BILLING_TAX_ID="123456789")
     def test_handler_and_generate_api(self):
         from apps.edi.utils.handler import Generate837PHandler
         from apps.edi.utils.schema import build_edi_content, render_edi_file
+
+        # tax_id is now required on the provider record (no settings fallback).
+        self.provider.tax_id = "123456789"
+        self.provider.save(update_fields=["tax_id", "updated_at"])
 
         handler = Generate837PHandler(self.batch.id)
         payload = handler.build_payload_dict()
@@ -263,6 +270,9 @@ class Generate837PTests(EDIFixturesMixin, AuthAPITestCase):
         self.assertEqual(edi_file.status, EDIFileStatus.GENERATED)
         self.assertTrue(edi_file.filename.startswith("TP123456-837P-"))
         self.assertTrue(edi_file.file_hash)
+        # After generation, claim status advances to EDI_GENERATED (not yet uploaded).
+        self.claim.refresh_from_db()
+        self.assertEqual(self.claim.status, ClaimStatus.EDI_GENERATED)
 
         # Second generate via API on same batch still allowed (new file)
         response = self.client.post(
@@ -363,6 +373,10 @@ class EDIAcknowledgementAPITests(EDIFixturesMixin, AuthAPITestCase):
             file_hash="ACKHASH1",
             path_or_blob_ref="media/edi/demo.txt",
         )
+        # After create_edi_file_for_batch, claim is EDI_GENERATED (not yet uploaded).
+        self.claim.refresh_from_db()
+        self.assertEqual(self.claim.status, ClaimStatus.EDI_GENERATED)
+
         mark_edi_file_uploaded(edi.id)
         self.claim.refresh_from_db()
         self.assertEqual(self.claim.status, ClaimStatus.EDI_SENT)
@@ -406,6 +420,9 @@ class EDIAcknowledgementAPITests(EDIFixturesMixin, AuthAPITestCase):
             path_or_blob_ref="media/edi/demo2.txt",
         )
         mark_edi_file_uploaded(edi.id)
+        # After upload, claim is EDI_SENT — ready for 999 ack.
+        self.claim.status = ClaimStatus.EDI_SENT
+        self.claim.save(update_fields=["status", "updated_at"])
         content = (
             "ISA*00*          *00*          *ZZ*COMEDASSISTPROG*ZZ*89513013       "
             "*260817*1947*^*00501*000000001*0*T*:~"
@@ -559,6 +576,11 @@ class EDI999ImportAPITests(EDIFixturesMixin, AuthAPITestCase):
             "IEA*1*000000001~"
         ).encode("utf-8")
 
+        # Advance claim to EDI_SENT first (simulating upload) so the 999
+        # ACCEPTED ack can advance it to EDI_ACCEPTED.
+        self.claim.status = ClaimStatus.EDI_SENT
+        self.claim.save(update_fields=["status", "updated_at"])
+
         with patch(
             "apps.edi.utils.import_999.download_bytes_via_sftp",
             return_value=content,
@@ -573,41 +595,56 @@ class EDI999ImportAPITests(EDIFixturesMixin, AuthAPITestCase):
         self.assertEqual(self.claim.status, ClaimStatus.EDI_ACCEPTED)
 
     def test_generate_matches_approved_sample_shape(self):
+        """
+        Verify 837P segment shape against the client-approved sample.
+
+        All values below are synthetic test data — no real company, person,
+        address, NPI, or credential should appear in source code.
+        """
+        from apps.claim_service_line.models import ClaimServiceLine
         from apps.edi.utils.handler import Generate837PHandler
         from apps.edi.utils.schema import build_edi_content, render_edi_file
 
-        self.partner.name = "REDART LLC"
-        self.partner.sender_id = "89513013"
-        self.partner.contact_name = "ABDUL WAHAB MIRZA"
-        self.partner.contact_phone = "5633075734"
+        SENDER = "SMPLSENDER1"
+        PROVIDER_NPI = "1999999999"
+        PROVIDER_TAX_ID = "000000000"
+
+        self.partner.name = "SAMPLE TRANSPORT LLC"
+        self.partner.sender_id = SENDER
+        self.partner.contact_name = "BILLING CONTACT"
+        self.partner.contact_phone = "0000000000"
         self.partner.save()
-        self.provider.billing_name = "REDART LLC"
-        self.provider.npi = "9000211959"
-        self.provider.address_line_1 = "1276 SANDALWOOD DR APT B"
-        self.provider.city = "COLORADO SPRINGS"
+
+        self.provider.billing_name = "SAMPLE TRANSPORT LLC"
+        self.provider.npi = PROVIDER_NPI
+        self.provider.tax_id = PROVIDER_TAX_ID
+        self.provider.address_line_1 = "100 SAMPLE ST"
+        self.provider.city = "DENVER"
         self.provider.state = "CO"
-        self.provider.zip = "80918"
+        self.provider.zip = "80000"
         self.provider.save()
-        self.patient.first_name = "JANE"
-        self.patient.last_name = "TESTPATIENT"
-        self.patient.medicaid_member_id = "Y999999"
-        self.patient.address_line_1 = "100 TEST STREET"
-        self.patient.city = "PUEBLO"
-        self.patient.zip = "81001"
-        self.patient.date_of_birth = date(1950, 1, 1)
+
+        self.patient.first_name = "SAMPLE"
+        self.patient.last_name = "PATIENT"
+        self.patient.medicaid_member_id = "SMPLMEMBER001"
+        self.patient.address_line_1 = "200 SAMPLE AVE"
+        self.patient.city = "DENVER"
+        self.patient.zip = "80001"
+        self.patient.date_of_birth = date(1970, 1, 1)
         self.patient.gender = "F"
         self.patient.save()
-        self.trip.driver_first_name = "CHRIS"
-        self.trip.driver_last_name = "TESTDRIVER"
+
+        self.trip.driver_first_name = "DRIVER"
+        self.trip.driver_last_name = "SAMPLE"
         self.trip.service_date = date(2026, 8, 5)
         self.trip.charge = Decimal("14.90")
         self.trip.save()
-        self.claim.claim_number = "TESTCLAIM0001"
+
+        self.claim.claim_number = "SAMPLECLAIM001"
         self.claim.diagnosis_code = "R69"
         self.claim.place_of_service = "03"
         self.claim.total_charge = Decimal("14.90")
         self.claim.save()
-        from apps.claim_service_line.models import ClaimServiceLine
 
         ClaimServiceLine.objects.filter(claim=self.claim).delete()
         ClaimServiceLine.objects.create(
@@ -635,13 +672,20 @@ class EDI999ImportAPITests(EDIFixturesMixin, AuthAPITestCase):
         payload = Generate837PHandler(self.batch.id).build_payload_dict()
         body = render_edi_file(build_edi_content(payload))
 
-        self.assertIn("NM1*41*2*REDART LLC*****46*89513013~", body)
-        self.assertIn("PER*IC*ABDUL WAHAB MIRZA*TE*5633075734~", body)
-        self.assertIn("NM1*85*2*REDART LLC*****XX*9000211959~", body)
-        self.assertIn("CLM*TESTCLAIM0001*14.90***03:B:1*Y*A*Y*Y~", body)
+        # Organisation entity (NM102=2): NM103+4 empty (NM104-NM107)+qualifier+id → 5 asterisks
+        self.assertIn(f"NM1*41*2*SAMPLE TRANSPORT LLC*****46*{SENDER}~", body)
+        self.assertIn("PER*IC*BILLING CONTACT*TE*0000000000~", body)
+        self.assertIn(f"NM1*85*2*SAMPLE TRANSPORT LLC*****XX*{PROVIDER_NPI}~", body)
+        self.assertIn(f"REF*EI*{PROVIDER_TAX_ID}~", body)
+        # Person entity (NM102=1): NM103+NM104+3 empty (NM105-NM107)+qualifier+id → 4 asterisks
+        self.assertIn("NM1*IL*1*PATIENT*SAMPLE****MI*SMPLMEMBER001~", body)
+        self.assertIn("CLM*SAMPLECLAIM001*14.90***03:B:1*Y*A*Y*Y~", body)
         self.assertIn("HI*ABK:R69~", body)
-        self.assertIn("NM1*DN*1*TESTDRIVER*CHRIS~", body)
+        self.assertIn("NM1*DN*1*SAMPLE*DRIVER~", body)
         self.assertIn("SV1*HC:A0120*12.15*UN*1*03**1~", body)
         self.assertIn("SV1*HC:S0215*2.75*UN*1*03**1~", body)
         self.assertIn("BHT*0019*00*0001*", body)
         self.assertNotIn("PRV*BI*", body)
+        # ISA must be exactly 106 chars
+        isa_line = [seg for seg in body.split("\n") if seg.startswith("ISA*")][0]
+        self.assertEqual(len(isa_line), 106, f"ISA length mismatch: {len(isa_line)}")

@@ -18,8 +18,8 @@ class LongDistancePilotAPITests(AttachmentWorkflowAPITests):
     def setUp(self):
         super().setUp()
         self.partner = TradingPartner.objects.create(
-            name="Colorado Medicaid",
-            sender_id="89513013",
+            name="Test Transport LLC",
+            sender_id="SMPLSENDER1",
             receiver_id="COMEDASSISTPROG",
             environment="TEST",
         )
@@ -52,6 +52,7 @@ class LongDistancePilotAPITests(AttachmentWorkflowAPITests):
             ]
         )
         self.provider.taxonomy_code = "343900000X"
+        self.provider.tax_id = "999999999"  # required for REF*EI (NPI provider)
         self.provider.address_line_1 = "100 Main St"
         self.provider.city = "Denver"
         self.provider.state = "CO"
@@ -60,6 +61,7 @@ class LongDistancePilotAPITests(AttachmentWorkflowAPITests):
         self.provider.save(
             update_fields=[
                 "taxonomy_code",
+                "tax_id",
                 "address_line_1",
                 "city",
                 "state",
@@ -106,9 +108,11 @@ class LongDistancePilotAPITests(AttachmentWorkflowAPITests):
         self.assertIn("import-999", data["next_actions"][0])
 
         self.claim.refresh_from_db()
+        # After 837P generation the claim advances to EDI_GENERATED;
+        # attachment flow may also have advanced it to ATTACHMENT_SUBMITTED.
         self.assertIn(
             self.claim.status,
-            (ClaimStatus.READY_FOR_837P, ClaimStatus.ATTACHMENT_SUBMITTED),
+            (ClaimStatus.READY_FOR_837P, ClaimStatus.ATTACHMENT_SUBMITTED, ClaimStatus.EDI_GENERATED),
         )
 
         batch = SubmissionBatch.objects.get(pk=data["batch_id"])

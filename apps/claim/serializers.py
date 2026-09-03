@@ -201,10 +201,10 @@ class CreateClaimFromTripSerializer(serializers.Serializer):
         required=False, allow_blank=True, allow_null=True
     )
     place_of_service = serializers.CharField(
-        required=False, allow_blank=True, allow_null=True, default="41"
+        required=False, allow_blank=True, allow_null=True
     )
     procedure_code = serializers.CharField(
-        required=False, allow_blank=True, allow_null=True, default="A0100"
+        required=False, allow_blank=True, allow_null=True
     )
     create_service_line = serializers.BooleanField(required=False, default=True)
 
@@ -218,10 +218,10 @@ class CreateClaimFromTripSerializer(serializers.Serializer):
         return clean_optional_text(value)
 
     def validate_place_of_service(self, value):
-        return clean_optional_text(value) or "41"
+        return clean_optional_text(value)
 
     def validate_procedure_code(self, value):
-        return clean_optional_text(value) or "A0100"
+        return clean_optional_text(value)
 
 
 class ClaimDocumentSerializer(serializers.ModelSerializer):

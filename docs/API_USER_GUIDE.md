@@ -629,8 +629,10 @@ Use after documents are uploaded and before/after 837P + attachment submit. See 
 | `DOCUMENTS_REQUIRED` | Long-distance docs incomplete — **blocked from batch** |
 | `DOCUMENTS_COMPLETE` | All required docs present |
 | `READY_FOR_837P` | Passed validation |
-| `EDI_SENT` | 837P generated/uploaded |
-| `EDI_ACCEPTED` | 999 accepted |
+| `EDI_GENERATED` | 837P file generated (not yet uploaded to HCPF) |
+| `EDI_SENT` | 837P uploaded to HCPF SFTP/MFT |
+| `EDI_ACCEPTED` | 999/TA1 accepted by HCPF |
+| `EDI_REJECTED` | 999/TA1 rejected — claim needs correction before resubmission |
 | `ATTACHMENT_REQUIRED` | Needs attachment channel submission |
 | `ATTACHMENT_QUEUED` | Queued for attachment |
 | `ATTACHMENT_SUBMITTED` | Sent via portal/MFT |

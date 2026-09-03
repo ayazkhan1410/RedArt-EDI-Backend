@@ -350,7 +350,7 @@ class ClaimFromTripAPIView(APIView):
                 external_id=data.get("external_id"),
                 diagnosis_code=data.get("diagnosis_code"),
                 place_of_service=data.get("place_of_service"),
-                procedure_code=data.get("procedure_code") or "A0100",
+                procedure_code=data.get("procedure_code"),
                 create_service_line=data.get("create_service_line", True),
             )
             payload = {"id": claim.id}

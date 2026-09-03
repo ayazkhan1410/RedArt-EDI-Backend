@@ -258,18 +258,39 @@ def validate_claim_for_edi(claim, *, update_status=True):
         if patient is None:
             errors.append("Trip is missing patient.")
         else:
-            if not patient.medicaid_member_id:
-                errors.append("Medicaid member ID missing.")
-            if not patient.has_837p_demographics():
+            if not (patient.medicaid_member_id or "").strip():
                 errors.append(
-                    "Patient demographics incomplete "
-                    "(gender, address_line_1, city, state, zip)."
+                    "Patient medicaid_member_id is missing "
+                    "(required — Colorado Medicaid Member ID, NM1*IL MI in 837P). "
+                    "Never fabricated; must be supplied by RedArt."
                 )
         provider = trip.provider
         if provider is None:
             errors.append("Trip is missing billing provider.")
-        elif not provider.npi:
-            errors.append("Provider NPI missing.")
+        else:
+            is_atypical = bool(getattr(provider, "is_atypical", False))
+            if is_atypical:
+                if not (getattr(provider, "medicaid_provider_id", None) or "").strip():
+                    errors.append(
+                        "Provider medicaid_provider_id is missing "
+                        "(required for atypical providers, NM108=1C in 837P)."
+                    )
+            else:
+                if not (provider.npi or "").strip():
+                    errors.append(
+                        "Provider npi is missing "
+                        "(required for standard providers, NM108=XX in 837P). "
+                        "If this is an atypical provider, set is_atypical=True."
+                    )
+                tax_id = "".join(
+                    ch for ch in str(getattr(provider, "tax_id", None) or "") if ch.isdigit()
+                )
+                if not tax_id:
+                    errors.append(
+                        "Provider tax_id (EIN/TIN) is missing "
+                        "(required for REF*EI in 837P 2010AA when NM108=XX). "
+                        "Set via the provider API; never hard-coded."
+                    )
 
     if not claim.service_lines.filter(is_active=True).exists():
         errors.append("Claim has no active service lines.")
@@ -525,7 +546,7 @@ def create_claim_from_trip(
     external_id=None,
     diagnosis_code=None,
     place_of_service=None,
-    procedure_code="A0100",
+    procedure_code=None,
     create_service_line=True,
 ):
     """

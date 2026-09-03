@@ -331,9 +331,8 @@ AWS_STORAGE_BUCKET_NAME = env("AWS_STORAGE_BUCKET_NAME", default="edi-files")
 AWS_S3_ENDPOINT_URL = env("AWS_S3_ENDPOINT_URL", default="http://127.0.0.1:9000")
 AWS_S3_REGION_NAME = env("AWS_S3_REGION_NAME", default="us-east-1")
 
-# Billing provider EIN/TIN for 2010AA REF*EI (required when NM1 uses NPI/XX).
-# Replace with real TIN in production; optional provider.tax_id field later.
-EDI_DEFAULT_BILLING_TAX_ID = env("EDI_DEFAULT_BILLING_TAX_ID", default="")
+# tax_id is now stored per ProviderBillingProfile (API-managed).
+# EDI_DEFAULT_BILLING_TAX_ID was removed — never use a global fallback TIN.
 EDI_MAX_SFTP_DOWNLOAD_BYTES = env.int("EDI_MAX_SFTP_DOWNLOAD_BYTES", default=5_000_000)
 EDI_SFTP_LIST_MAX_FILES = env.int("EDI_SFTP_LIST_MAX_FILES", default=5000)
 EDI_MAX_X12_CONTENT_CHARS = env.int("EDI_MAX_X12_CONTENT_CHARS", default=2_000_000)
