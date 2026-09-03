@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import logging
+import os
 import traceback
 from pathlib import Path
+from types import SimpleNamespace
 
 from django.conf import settings
 from django.db import transaction
@@ -54,7 +56,29 @@ def resolve_outbound_directory(*, trading_partner_id=None, credentials_id=None):
             credentials = credentials.filter(pk=credentials_id)
         credential = credentials.order_by("-id").first()
         if credential is None:
-            raise ValueError("No active Edifecs SFTP credential configured for upload.")
+            key_path = Path(
+                os.environ.get(
+                    "HCPF_SFTP_PRIVATE_KEY_PATH",
+                    "/etc/secrets/edifecs_sftp_private_key.pem",
+                )
+            )
+            if not key_path.is_file():
+                raise ValueError("The Render Edifecs private key is not mounted.")
+            credential = SimpleNamespace(
+                host="sftp.mft.edifecsfedcloud.com",
+                port=22,
+                username="mft_task_01fce47a-0498-4fb4-wt4m",
+                auth_type="PRIVATE_KEY",
+                password=None,
+                private_key_pem=key_path.read_text(encoding="utf-8"),
+                private_key_passphrase=None,
+                host_fingerprint="SHA256:xhCbKNBog9ztBEubwfUfb1ODz8e/azOlVeaVb77ug8Q",
+                timeout_seconds=45,
+            )
+            return SimpleNamespace(
+                credentials=credential,
+                sending_path="Outgoing/edifecs.stco.hosted/toedifecs",
+            )
         directory, _ = SFTPDirectory.objects.update_or_create(
             credentials=credential,
             purpose=SFTPDirectoryPurpose.OUTBOUND_837P,
