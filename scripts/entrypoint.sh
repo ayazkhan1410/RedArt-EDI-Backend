@@ -171,6 +171,7 @@ PY
 ROLE="${1:-web}"
 
 # ========
+client = redis.Redis(host=host, port=port, username=parsed.username, password=parsed.password, socket_connect_timeout=3)
 # Shared startup
 # ========
 wait_for_postgres
