@@ -67,17 +67,22 @@ wait_for_redis() {
   python - <<'PY'
 import os
 import time
-from urllib.parse import urlparse
 
 import redis
 
 url = os.environ.get("CELERY_BROKER_URL", "redis://redis:6379/0")
-parsed = urlparse(url)
-host = parsed.hostname or "redis"
-port = parsed.port or 6379
 
 deadline = time.time() + 60
-
+# Keep the full URL so authenticated and TLS Redis connections retain their
+# username, password, database, and SSL query options.
+client = redis.Redis(
+    host=parsed.hostname or "redis",
+    port=parsed.port or 6379,
+    username=parsed.username,
+    password=parsed.password,
+    ssl=parsed.scheme == "rediss",
+    socket_connect_timeout=3,
+)
 while True:
     try:
         client.ping()
@@ -171,7 +176,6 @@ PY
 ROLE="${1:-web}"
 
 # ========
-client = redis.Redis(host=host, port=port, username=parsed.username, password=parsed.password, socket_connect_timeout=3)
 # Shared startup
 # ========
 wait_for_postgres
