@@ -67,10 +67,12 @@ wait_for_redis() {
   python - <<'PY'
 import os
 import time
+from urllib.parse import urlparse
 
 import redis
 
 url = os.environ.get("CELERY_BROKER_URL", "redis://redis:6379/0")
+parsed = urlparse(url)
 
 deadline = time.time() + 60
 # Keep the full URL so authenticated and TLS Redis connections retain their
