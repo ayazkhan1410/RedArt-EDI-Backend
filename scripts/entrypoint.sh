@@ -137,8 +137,8 @@ PeriodicTask.objects.update_or_create(
     },
 )
 
-hourly, _ = CrontabSchedule.objects.get_or_create(
-    minute="0",
+every_minute, _ = CrontabSchedule.objects.get_or_create(
+    minute="*",
     hour="*",
     day_of_week="*",
     day_of_month="*",
@@ -146,17 +146,17 @@ hourly, _ = CrontabSchedule.objects.get_or_create(
     timezone="UTC",
 )
 PeriodicTask.objects.update_or_create(
-    name="poll-edi-999-imports-hourly",
+    name="poll-edi-999-imports-every-minute",
     defaults={
-        "crontab": hourly,
+        "crontab": every_minute,
         "interval": None,
         "task": "apps.edi.tasks.poll_edi_999_imports",
         "enabled": True,
-        "description": "Import 999: poll SFTP inbound folders hourly and queue Celery imports.",
+        "description": "Import 999: poll SFTP inbound folders every minute.",
     },
 )
-hourly_15, _ = CrontabSchedule.objects.get_or_create(
-    minute="15",
+every_two_minutes, _ = CrontabSchedule.objects.get_or_create(
+    minute="*/2",
     hour="*",
     day_of_week="*",
     day_of_month="*",
@@ -164,16 +164,40 @@ hourly_15, _ = CrontabSchedule.objects.get_or_create(
     timezone="UTC",
 )
 PeriodicTask.objects.update_or_create(
-    name="poll-edi-835-imports-hourly",
+    name="poll-edi-277-imports-every-two-minutes",
     defaults={
-        "crontab": hourly_15,
+        "crontab": every_two_minutes,
+        "interval": None,
+        "task": "apps.edi.tasks.poll_edi_277_imports",
+        "enabled": True,
+        "description": "Import 277 claim statuses every two minutes.",
+    },
+)
+every_five_minutes, _ = CrontabSchedule.objects.get_or_create(
+    minute="*/5",
+    hour="*",
+    day_of_week="*",
+    day_of_month="*",
+    month_of_year="*",
+    timezone="UTC",
+)
+PeriodicTask.objects.update_or_create(
+    name="poll-edi-835-imports-every-five-minutes",
+    defaults={
+        "crontab": every_five_minutes,
         "interval": None,
         "task": "apps.edi.tasks.poll_edi_835_imports",
         "enabled": True,
-        "description": "Import 835: poll SFTP inbound folders hourly and queue Celery imports.",
+        "description": "Import 835 remittances every five minutes.",
     },
 )
-print("[entrypoint] Beat schedule ready: cleanup, poll-999, poll-835")
+PeriodicTask.objects.filter(
+    name__in=(
+        "poll-edi-999-imports-hourly",
+        "poll-edi-835-imports-hourly",
+    )
+).update(enabled=False)
+print("[entrypoint] Beat schedule ready: cleanup, poll-999, poll-277, poll-835")
 PY
 }
 
