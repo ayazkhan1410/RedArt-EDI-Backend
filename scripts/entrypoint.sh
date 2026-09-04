@@ -71,7 +71,9 @@ from urllib.parse import urlparse
 
 import redis
 
-url = os.environ.get("CELERY_BROKER_URL", "redis://redis:6379/0")
+url = os.environ.get("REDIS_AUTH_URL") or os.environ.get(
+    "CELERY_BROKER_URL", "redis://redis:6379/0"
+)
 parsed = urlparse(url)
 
 deadline = time.time() + 60
