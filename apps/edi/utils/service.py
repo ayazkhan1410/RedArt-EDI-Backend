@@ -1,5 +1,7 @@
 """EDI control-number allocation and file record helpers."""
 
+from zoneinfo import ZoneInfo
+
 from django.db import IntegrityError, transaction
 from django.utils import timezone
 
@@ -85,17 +87,29 @@ def build_colorado_837p_filename(
     of_parts=1,
 ):
     """
-    Colorado-style outbound name:
-    {sender}-837P-{YYYYMMDDHHMMSSmmm}-{part}of{of_parts}.txt
+    HCPF production file name:
+    tp{sender}-837P-{YYYYMMDDHHMMSSmmm}-1of1.x12
+
+    HCPF requires the timestamp in Mountain Time, regardless of Django's
+    configured TIME_ZONE (the service runs in UTC), and accepts only 1of1 for
+    837 transactions.
     """
+    if part != 1 or of_parts != 1:
+        raise ValueError("HCPF 837P filenames only support the required 1of1 value.")
+
     when = generated_at or timezone.now()
     if timezone.is_naive(when):
-        stamp = when.strftime("%Y%m%d%H%M%S") + f"{when.microsecond // 1000:03d}"
-    else:
-        local = timezone.localtime(when)
-        stamp = local.strftime("%Y%m%d%H%M%S") + f"{local.microsecond // 1000:03d}"
-    sender = (sender_id or "UNKNOWN").strip() or "UNKNOWN"
-    return f"{sender}-837P-{stamp}-{part}of{of_parts}.txt"
+        when = timezone.make_aware(when, timezone=ZoneInfo("UTC"))
+    mountain = when.astimezone(ZoneInfo("America/Denver"))
+    stamp = mountain.strftime("%Y%m%d%H%M%S") + f"{mountain.microsecond // 1000:03d}"
+
+    sender = (sender_id or "").strip()
+    if not sender:
+        raise ValueError("HCPF Trading Partner ID is required for the 837P filename.")
+    if sender[:2].lower() == "tp":
+        sender = sender[2:]
+    sender = f"tp{sender}"
+    return f"{sender}-837P-{stamp}-1of1.x12"
 
 
 @transaction.atomic
@@ -601,3 +615,4 @@ def import_validation_report(
         is_active=True,
     )
     return row, parsed, True
+
