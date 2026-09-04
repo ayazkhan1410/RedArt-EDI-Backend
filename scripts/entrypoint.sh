@@ -77,7 +77,7 @@ host = parsed.hostname or "redis"
 port = parsed.port or 6379
 
 deadline = time.time() + 60
-client = redis.Redis.(url, socket_connect_timeout=3)
+
 while True:
     try:
         client.ping()
