@@ -206,25 +206,37 @@ def build_edi_content(payload: dict) -> list[str]:
         edi_content.append(_seg(envelope, "HL", str(billing_hl), "", "20", "1"))
 
         # ── 2010AA Billing Provider Name ─────────────────────────────────────
-        # NM108 is always XX (matches HCPF-accepted sample).
-        # NM109:
-        #   Standard (is_atypical=False): npi
-        #   Atypical  (is_atypical=True): medicaid_provider_id (never invent NPI)
+        # X12 qualifier rules (005010X222A1 §2010AA):
+        #   Standard provider (is_atypical=False):
+        #     NM108=XX, NM109=NPI  → then REF*EI if EIN exists.
+        #   Atypical provider (is_atypical=True, no NPI):
+        #     NM108/NM109 omitted (XX is reserved for NPI; never fabricate one).
+        #     Colorado Medicaid Provider ID placed in REF*G2 (2010AA secondary ID).
+        #     Per HCPF General Provider Manual and X12 companion guidance.
+        #     NOTE: Confirm exact loop/qualifier with HCPF test-site before PROD.
         is_atypical = bool(provider.get("is_atypical"))
-        billing_qualifier = "XX"
-        billing_id = (
-            provider.get("medicaid_provider_id", "")
-            if is_atypical
-            else provider.get("npi", "")
-        )
 
-        if not (billing_id or "").strip():
-            raise ValueError(
-                f"Claim {claim.get('claim_number', claim.get('claim_id'))}: "
-                f"provider has no billing identifier "
-                f"({'medicaid_provider_id' if is_atypical else 'npi'}). "
-                "Never fabricate an identifier."
-            )
+        if is_atypical:
+            medicaid_pid = (provider.get("medicaid_provider_id") or "").strip()
+            if not medicaid_pid:
+                raise ValueError(
+                    f"Claim {claim.get('claim_number', claim.get('claim_id'))}: "
+                    "atypical provider is missing medicaid_provider_id. "
+                    "Never fabricate an identifier."
+                )
+            # NM108/NM109 left blank — atypical providers have no NPI.
+            billing_qualifier = ""
+            billing_id = ""
+        else:
+            npi = (provider.get("npi") or "").strip()
+            if not npi:
+                raise ValueError(
+                    f"Claim {claim.get('claim_number', claim.get('claim_id'))}: "
+                    "standard provider is missing NPI. "
+                    "Never fabricate an identifier."
+                )
+            billing_qualifier = "XX"
+            billing_id = npi
 
         provider_display_name = (
             provider.get("billing_name") or provider.get("legal_name") or "PROVIDER"
@@ -254,12 +266,18 @@ def build_edi_content(payload: dict) -> list[str]:
             if city or state or zip_code:
                 edi_content.append(_seg(envelope, "N4", city, state, zip_code))
 
-        # REF*EI (tax_id / EIN) — only when a real tax_id exists. Never invent.
-        tax_id = "".join(
-            ch for ch in str(provider.get("tax_id") or "") if ch.isdigit()
-        )
-        if tax_id:
-            edi_content.append(_seg(envelope, "REF", "EI", tax_id[:9]))
+        if is_atypical:
+            # REF*G2 = Colorado Medicaid Provider ID (state-assigned atypical ID).
+            # Replaces NM108=XX/NM109 which is reserved for NPI only.
+            medicaid_pid = (provider.get("medicaid_provider_id") or "").strip()
+            edi_content.append(_seg(envelope, "REF", "G2", medicaid_pid))
+        else:
+            # REF*EI (tax_id / EIN) — only when a real tax_id exists. Never invent.
+            tax_id = "".join(
+                ch for ch in str(provider.get("tax_id") or "") if ch.isdigit()
+            )
+            if tax_id:
+                edi_content.append(_seg(envelope, "REF", "EI", tax_id[:9]))
 
         # ── 2000B Subscriber HL ──────────────────────────────────────────────
         edi_content.append(_seg(envelope, "HL", "2", str(billing_hl), "22", "0"))
@@ -353,21 +371,11 @@ def build_edi_content(payload: dict) -> list[str]:
             diag = str(claim["diagnosis_code"]).replace(".", "")
             edi_content.append(_seg(envelope, "HI", f"ABK{cp}{diag}"))
 
-        # NM1*DN (driver) after HI, before 2400 service lines (per CO companion).
-        driver = claim.get("driver") or {}
-        driver_last = (driver.get("last_name") or "").strip()
-        driver_first = (driver.get("first_name") or "").strip()
-        if driver_last or driver_first:
-            edi_content.append(
-                _seg(
-                    envelope,
-                    "NM1",
-                    "DN",
-                    "1",
-                    driver_last,
-                    driver_first,
-                )
-            )
+        # NM1*DN (referring provider) is NOT used for NEMT drivers.
+        # DN = referring provider qualifier; HCPF has not instructed DN for drivers.
+        # Driver identity is stored on NemtTrip for operational records only.
+        # Do not emit driver name in any X12 provider loop unless HCPF explicitly
+        # requires it and specifies the correct loop/qualifier in writing.
 
         # ── 2400 Service Lines ────────────────────────────────────────────────
         for idx, line in enumerate(claim.get("service_lines") or [], start=1):

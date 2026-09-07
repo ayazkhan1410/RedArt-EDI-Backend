@@ -454,7 +454,8 @@ class EDIAcknowledgementAPITests(EDIFixturesMixin, AuthAPITestCase):
         self.claim.refresh_from_db()
         self.assertEqual(self.claim.status, ClaimStatus.EDI_ACCEPTED)
 
-    def test_generate_includes_driver_nm1_dn(self):
+    def test_driver_nm1_dn_not_emitted(self):
+        """T5: NM1*DN is the referring-provider qualifier — must NOT appear for drivers."""
         from apps.edi.utils.handler import Generate837PHandler
         from apps.edi.utils.schema import build_edi_content, render_edi_file
 
@@ -465,12 +466,8 @@ class EDIAcknowledgementAPITests(EDIFixturesMixin, AuthAPITestCase):
         )
         payload = Generate837PHandler(self.batch.id).build_payload_dict()
         body = render_edi_file(build_edi_content(payload))
-        self.assertIn("NM1*DN*1*TESTDRIVER*CHRIS~", body)
-        hi_i = body.index("HI*ABK:")
-        dn_i = body.index("NM1*DN*")
-        lx_i = body.index("LX*1~")
-        self.assertLess(hi_i, dn_i)
-        self.assertLess(dn_i, lx_i)
+        # DN = referring provider qualifier; must never appear for NEMT drivers.
+        self.assertNotIn("NM1*DN*", body)
 
 
 class EDI999ImportAPITests(EDIFixturesMixin, AuthAPITestCase):
@@ -681,7 +678,7 @@ class EDI999ImportAPITests(EDIFixturesMixin, AuthAPITestCase):
         self.assertIn("NM1*IL*1*PATIENT*SAMPLE****MI*SMPLMEMBER001~", body)
         self.assertIn("CLM*SAMPLECLAIM001*14.90***03:B:1*Y*A*Y*Y~", body)
         self.assertIn("HI*ABK:R69~", body)
-        self.assertIn("NM1*DN*1*SAMPLE*DRIVER~", body)
+        self.assertNotIn("NM1*DN*", body)  # T5: DN = referring provider, not driver
         self.assertIn("SV1*HC:A0120*12.15*UN*1*03**1~", body)
         self.assertIn("SV1*HC:S0215*2.75*UN*1*03**1~", body)
         self.assertIn("BHT*0019*00*0001*", body)

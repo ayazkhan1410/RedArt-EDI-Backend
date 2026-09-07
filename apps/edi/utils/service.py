@@ -305,7 +305,9 @@ def mark_edi_file_uploaded(edi_file_id, *, path_or_blob_ref=None, file_hash=None
         batch.status = BatchStatus.SUBMITTED
         batch.save(update_fields=["status", "updated_at"])
 
-    # Business claim status: EDI_GENERATED → EDI_SENT (= uploaded to HCPF).
+    # Business claim status: EDI_GENERATED → EDI_SENT.
+    # EDI_SENT means "written to HCPF SFTP/MFT" — not gateway pickup, not paid.
+    # HCPF pickup evidence requires a 999/TA1 (→ EDI_ACCEPTED or EDI_REJECTED).
     # Also accepts READY_FOR_837P / DOCUMENTS_COMPLETE for backward compat with
     # flows that did not pass through the EDI_GENERATED intermediate state.
     if edi_file.batch_id:

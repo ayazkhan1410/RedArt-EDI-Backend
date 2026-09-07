@@ -32,10 +32,11 @@ class AcknowledgementStatus(models.TextChoices):
 
 
 class EDIFileStatus(models.TextChoices):
-    GENERATED = "GENERATED", "Generated"
+    GENERATED = "GENERATED", "Generated (not yet sent)"
     UPLOAD_QUEUED = "UPLOAD_QUEUED", "Upload queued"
-    UPLOADED = "UPLOADED", "Uploaded"
-    ACKNOWLEDGED = "ACKNOWLEDGED", "Acknowledged"
+    # UPLOADED = written to HCPF SFTP/MFT. Does NOT mean HCPF picked it up.
+    UPLOADED = "UPLOADED", "Uploaded to SFTP (not yet confirmed by HCPF)"
+    ACKNOWLEDGED = "ACKNOWLEDGED", "Acknowledged by HCPF gateway"
     FAILED = "FAILED", "Failed"
     ARCHIVED = "ARCHIVED", "Archived"
 

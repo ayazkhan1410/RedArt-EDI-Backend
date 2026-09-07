@@ -310,17 +310,26 @@ class TestAtypicalProvider(EnterpriseFixturesMixin, TestCase):
         batch = self._make_batch(self.partner, claim)
         return batch
 
-    def test_atypical_provider_nm108_is_xx(self):
-        """Atypical provider: NM108=XX, NM109=medicaid_provider_id (no invented NPI)."""
+    def test_atypical_provider_uses_ref_g2_not_xx(self):
+        """
+        T4: Atypical provider — Medicaid ID must go in REF*G2, NOT behind XX.
+        XX is reserved exclusively for NPI. NM108/NM109 must be blank for atypical.
+        """
         from apps.edi.utils.handler import Generate837PHandler
         batch = self._build_atypical_batch()
         payload = Generate837PHandler(batch.id).build_payload_dict()
         body = render_edi_file(build_edi_content(payload))
-        self.assertIn("*XX*ATYPTST001~", body)
+        # Medicaid Provider ID in REF*G2
+        self.assertIn("REF*G2*ATYPTST001~", body)
+        # XX must NOT appear with the atypical Medicaid ID
+        self.assertNotIn("*XX*ATYPTST001~", body)
+        # Old 1C qualifier must never appear
         self.assertNotIn("*1C*", body)
+        # NM108/NM109 blank: NM1*85*2*NAME~  (trailing ~ immediately after name)
+        self.assertIn("NM1*85*2*", body)
 
     def test_atypical_provider_no_ref_ei_without_tax_id(self):
-        """Without tax_id, do not invent REF*EI."""
+        """Atypical provider: no EIN, so REF*EI must NOT appear."""
         from apps.edi.utils.handler import Generate837PHandler
         batch = self._build_atypical_batch()
         payload = Generate837PHandler(batch.id).build_payload_dict()
