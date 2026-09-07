@@ -25,14 +25,13 @@ HOST = "sftp.mft.edifecsfedcloud.com"
 USERNAME = "mft_task_01fce47a-0498-4fb4-wt4m"
 HOST_FINGERPRINT = "SHA256:xhCbKNBog9ztBEubwfUfb1ODz8e/azOlVeaVb77ug8Q"
 
-# --- Previous path pairs (rollback if Edifecs confirms otherwise) ---
-# SEND_PATH = "Outgoing/edifecs.stco.hosted/toedifecs"
-# RECEIVE_PATH = "Organizational/Incoming/fromedifecs/edifecs.stco.hosted"
-# SEND_PATH = "Organizational/Outgoing/edifecs.stco.hosted/toedifecs"
-# RECEIVE_PATH = "Organizational/Incoming/fromedifecs/edifecs.stco.hosted"
-# Ops swap 2026-09-07: drop 837P into Incoming; poll 999/errors from Outgoing.
-SEND_PATH = HCPF_837P_SEND_PATH  # Organizational/Incoming/fromedifecs/...
-RECEIVE_PATH = HCPF_ACK_RECEIVE_PATH  # Organizational/Outgoing/.../toedifecs
+# Confirmed 2026-09-07: 999 acks appear in the SAME folder as outbound 837P.
+# Both SEND_PATH and RECEIVE_PATH therefore point to the same MFT directory.
+# Previous guesses (all wrong):
+#   SEND="Outgoing/edifecs.stco.hosted/toedifecs"
+#   SEND="Organizational/Outgoing/edifecs.stco.hosted/toedifecs"
+SEND_PATH = HCPF_837P_SEND_PATH
+RECEIVE_PATH = HCPF_ACK_RECEIVE_PATH
 
 
 def main():

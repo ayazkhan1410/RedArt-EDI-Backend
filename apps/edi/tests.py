@@ -709,20 +709,20 @@ class EDI999ImportAPITests(EDIFixturesMixin, AuthAPITestCase):
 
 
 class HcpfSftpPathSwapTests(TestCase):
-    """Ops path swap: send → Incoming/fromedifecs; poll ← Outgoing/toedifecs."""
+    """
+    Confirmed 2026-09-07: Edifecs MFT drops 999 acks in the SAME folder
+    we send 837P to (Organizational/Incoming/fromedifecs/…).
+    Both SEND and RECEIVE paths are therefore identical.
+    """
 
-    def test_path_constants_swapped(self):
+    def test_path_constants_confirmed(self):
         from apps.edi.utils.upload import HCPF_837P_SEND_PATH, HCPF_ACK_RECEIVE_PATH
 
-        self.assertEqual(
-            HCPF_837P_SEND_PATH,
-            "Organizational/Incoming/fromedifecs/edifecs.stco.hosted",
-        )
-        self.assertEqual(
-            HCPF_ACK_RECEIVE_PATH,
-            "Organizational/Outgoing/edifecs.stco.hosted/toedifecs",
-        )
-        self.assertNotEqual(HCPF_837P_SEND_PATH, HCPF_ACK_RECEIVE_PATH)
+        confirmed = "Organizational/Incoming/fromedifecs/edifecs.stco.hosted"
+        self.assertEqual(HCPF_837P_SEND_PATH, confirmed)
+        # 999 acks arrive in the same folder — both constants must match.
+        self.assertEqual(HCPF_ACK_RECEIVE_PATH, confirmed)
+        self.assertEqual(HCPF_837P_SEND_PATH, HCPF_ACK_RECEIVE_PATH)
 
     def test_sync_updates_stale_edifecs_directory_paths(self):
         from apps.edi.models import SFTPCredentials, SFTPDirectory
