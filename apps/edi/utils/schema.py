@@ -258,13 +258,21 @@ def build_edi_content(payload: dict) -> list[str]:
         )
 
         # N3/N4 — only emit when address data is present.
+        # Never emit N4 with a blank postal code (HCPF 999 IK4*I9 on N4-03).
         if (provider.get("address_line_1") or "").strip():
             edi_content.append(_seg(envelope, "N3", provider["address_line_1"]))
-            city = provider.get("city") or ""
-            state = provider.get("state") or ""
-            zip_code = provider.get("zip") or ""
-            if city or state or zip_code:
-                edi_content.append(_seg(envelope, "N4", city, state, zip_code))
+            city = (provider.get("city") or "").strip()
+            state = (provider.get("state") or "").strip()
+            zip_code = "".join(
+                ch for ch in str(provider.get("zip") or "") if ch.isdigit()
+            )
+            if not zip_code:
+                raise ValueError(
+                    f"Provider billing zip is missing (N4-03). "
+                    f"Cannot emit incomplete N4 for claim "
+                    f"{claim.get('claim_number', claim.get('claim_id'))}."
+                )
+            edi_content.append(_seg(envelope, "N4", city, state, zip_code))
 
         if is_atypical:
             # REF*G2 = Colorado Medicaid Provider ID (state-assigned atypical ID).
