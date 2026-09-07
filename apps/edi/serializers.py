@@ -125,18 +125,28 @@ class AllocateControlNumberSerializer(serializers.Serializer):
 
 
 class EDIFileSerializer(serializers.ModelSerializer):
+    # T9: expose latest ack so Lovable/Supabase always sees real gateway state.
+    latest_ack_status = serializers.SerializerMethodField(read_only=True)
+    latest_ack_type = serializers.SerializerMethodField(read_only=True)
+    isa13 = serializers.SerializerMethodField(read_only=True)
+    gs06 = serializers.SerializerMethodField(read_only=True)
+
     class Meta:
         model = EDIFile
         fields = (
             "id",
             "batch",
             "control_number",
+            "isa13",
+            "gs06",
             "transaction_type",
             "filename",
             "file_hash",
             "path_or_blob_ref",
             "status",
             "uploaded_at",
+            "latest_ack_status",
+            "latest_ack_type",
             "is_active",
             "created_at",
             "updated_at",
@@ -150,6 +160,20 @@ class EDIFileSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
         )
+
+    def get_latest_ack_status(self, obj):
+        ack = obj.acknowledgements.filter(is_active=True).order_by("-id").first()
+        return ack.status if ack else None
+
+    def get_latest_ack_type(self, obj):
+        ack = obj.acknowledgements.filter(is_active=True).order_by("-id").first()
+        return ack.ack_type if ack else None
+
+    def get_isa13(self, obj):
+        return obj.control_number.isa13 if obj.control_number_id else None
+
+    def get_gs06(self, obj):
+        return obj.control_number.gs06 if obj.control_number_id else None
 
     def validate_transaction_type(self, value):
         if value in (None, ""):

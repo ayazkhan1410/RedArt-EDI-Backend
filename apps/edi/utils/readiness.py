@@ -14,12 +14,13 @@ Rules (Colorado Medicaid NEMT):
 
   Provider (billing):
     Standard NPI provider (is_atypical=False):
-      - npi required (NM108=XX)
+      - npi required (NM108=XX, NM109=NPI)
       - tax_id required (REF*EI in 2010AA)
       - taxonomy_code required
 
     Atypical Colorado Medicaid provider (is_atypical=True, no NPI):
-      - medicaid_provider_id required (NM108=XX, NM109=medicaid_provider_id)
+      - medicaid_provider_id required → REF*G2 in 2010AA
+      - NM108/NM109 omitted (XX is reserved for NPI; never use XX with a non-NPI)
       - npi must be absent — never fabricate one
 
   Batch:
@@ -87,7 +88,8 @@ def _validate_patient(patient, claim_label: str) -> list[str]:
 def _validate_provider(provider, claim_label: str) -> list[str]:
     """
     Standard NPI provider:  npi + tax_id + taxonomy_code required.
-    Atypical provider:       medicaid_provider_id + taxonomy_code required; no NPI.
+    Atypical provider:       medicaid_provider_id required (→ REF*G2); no NPI.
+                             XX qualifier is reserved for NPI — never use with a Medicaid ID.
     """
     errors = []
     is_atypical = bool(getattr(provider, "is_atypical", False))
@@ -98,7 +100,7 @@ def _validate_provider(provider, claim_label: str) -> list[str]:
             errors.append(
                 f"{claim_label}: provider {provider.id} is marked atypical but "
                 "is missing medicaid_provider_id "
-                "(NM108=XX, NM109=medicaid_provider_id)."
+                "(required for REF*G2 in 2010AA — XX qualifier is NPI-only)."
             )
         npi = (provider.npi or "").strip()
         if npi:

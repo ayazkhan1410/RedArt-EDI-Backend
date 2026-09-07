@@ -19,10 +19,18 @@ from apps.claim.models import BatchClaim, Claim
 from apps.claim_service_line.models import ClaimServiceLine
 from apps.edi.choices import EDIFileStatus, TransactionType
 from apps.edi.models import EDIFile
+import re
+
 from apps.edi.utils.envelope import get_edi_envelope_config
 from apps.edi.utils.readiness import load_batch_for_837p
 from apps.edi.utils.schema import build_edi_content, render_edi_file
 from apps.edi.utils.service import allocate_control_numbers, build_colorado_837p_filename
+
+# HCPF required filename pattern: tp{TPID}-837P-{17-digit-stamp}-1of1.x12
+_HCPF_FILENAME_RE = re.compile(
+    r"^tp\d+-837P-\d{17}-1of1\.x12$",
+    re.IGNORECASE,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -55,9 +63,12 @@ class Generate837PHandler:
         self.allocate_controls = allocate_controls
         self.control = None
         if allocate_controls:
+            # force_new=True: every physical generate() call gets a unique ISA13/GS06.
+            # Two different X12 files must never share the same interchange control number.
             self.control, _ = allocate_control_numbers(
                 batch_id=self.batch.id,
                 environment=self.environment,
+                force_new=True,
             )
 
         self.batch_claims = list(
@@ -80,6 +91,7 @@ class Generate837PHandler:
             self.control, _ = allocate_control_numbers(
                 batch_id=self.batch.id,
                 environment=self.environment,
+                force_new=True,
             )
 
         claims = []
@@ -195,6 +207,12 @@ class Generate837PHandler:
             sender_id=self.partner.sender_id,
             generated_at=self.generated_at,
         )
+        # T7: hard-stop if the filename doesn't match HCPF convention.
+        if not _HCPF_FILENAME_RE.match(filename):
+            raise ValueError(
+                f"Generated filename '{filename}' does not match the required "
+                "HCPF pattern tp{{TPID}}-837P-{{17-digit-stamp}}-1of1.x12"
+            )
         relative_dir = Path("edi") / "837p" / str(self.batch.id)
         abs_dir = Path(settings.MEDIA_ROOT) / relative_dir
         abs_dir.mkdir(parents=True, exist_ok=True)
