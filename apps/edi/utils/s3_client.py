@@ -23,34 +23,57 @@ def get_s3_client():
 
 
 def ensure_bucket(bucket=None):
+    """
+    Verify or create bucket.  In local/docker (DEBUG) auto-creates via MinIO.
+    In production: bucket must exist; logs a warning rather than hard-raising so
+    that a missing S3 config never blocks the SFTP upload path (S3 = audit only).
+    Returns bucket name or None if unavailable.
+    """
     bucket = bucket or settings.AWS_STORAGE_BUCKET_NAME
     client = get_s3_client()
     try:
         client.head_bucket(Bucket=bucket)
+        return bucket
     except Exception as exc:
-        if not settings.DEBUG:
-            raise ValueError(
-                f"S3 bucket '{bucket}' is not accessible. "
-                "Create the bucket during infrastructure setup."
-            ) from exc
-        try:
-            client.create_bucket(Bucket=bucket)
-            logger.info("Created S3/MinIO bucket=%s", bucket)
-        except Exception:
-            logger.exception("ensure_bucket failed for %s", bucket)
-            raise
-    return bucket
+        if settings.DEBUG:
+            try:
+                client.create_bucket(Bucket=bucket)
+                logger.info("Created S3/MinIO bucket=%s", bucket)
+                return bucket
+            except Exception:
+                logger.exception("ensure_bucket failed for %s", bucket)
+                return None
+        # Production: log and return None — SFTP is the critical path.
+        logger.warning(
+            "S3 audit bucket '%s' not accessible (%s). "
+            "Set AWS_* env vars and create the private bucket. "
+            "SFTP upload is unaffected.",
+            bucket,
+            exc,
+        )
+        return None
 
 
-def upload_bytes_to_s3(*, key, data: bytes, content_type="text/plain", bucket=None) -> str:
-    bucket = ensure_bucket(bucket)
-    client = get_s3_client()
-    client.put_object(
-        Bucket=bucket,
-        Key=key,
-        Body=data,
-        ContentType=content_type,
-    )
-    uri = f"s3://{bucket}/{key}"
-    logger.info("S3/MinIO upload ok uri=%s bytes=%s", uri, len(data))
-    return uri
+def upload_bytes_to_s3(*, key, data: bytes, content_type="text/plain", bucket=None) -> str | None:
+    """
+    Upload to S3/MinIO for audit archiving.  Returns s3:// URI or None on failure.
+    Never raises — S3 is audit-only; SFTP is the authoritative delivery channel.
+    """
+    try:
+        resolved = ensure_bucket(bucket)
+        if resolved is None:
+            return None
+        client = get_s3_client()
+        client.put_object(
+            Bucket=resolved,
+            Key=key,
+            Body=data,
+            ContentType=content_type,
+            ServerSideEncryption="AES256",  # enforce encryption at rest
+        )
+        uri = f"s3://{resolved}/{key}"
+        logger.info("S3 audit upload ok uri=%s bytes=%s", uri, len(data))
+        return uri
+    except Exception as exc:
+        logger.warning("S3 audit upload failed (non-fatal) key=%s: %s", key, exc)
+        return None

@@ -16,15 +16,17 @@ class ClaimStatus(models.TextChoices):
     # "837P generated ≠ uploaded" — per client requirement.
     EDI_GENERATED = "EDI_GENERATED", "837P generated (pending upload)"
 
-    # 837P file has been uploaded to the HCPF SFTP/MFT channel.
+    # 837P file uploaded to HCPF SFTP/MFT. Proves SFTP write only —
+    # NOT HCPF pickup, gateway acceptance, or claim adjudication.
     # Legacy alias EDI_SENT is kept so existing DB rows remain valid.
-    EDI_SENT = "EDI_SENT", "837P sent/uploaded"
+    EDI_SENT = "EDI_SENT", "Uploaded to SFTP (awaiting HCPF pickup)"
 
-    # 999 / TA1 acknowledgement received and accepted.
-    EDI_ACCEPTED = "EDI_ACCEPTED", "999/TA1 accepted"
+    # 999 / TA1 acknowledgement received and accepted by HCPF gateway.
+    # Structural accept only — does not mean claim is paid.
+    EDI_ACCEPTED = "EDI_ACCEPTED", "999/TA1 accepted by HCPF gateway"
 
     # 999 / TA1 received and rejected — claim needs correction.
-    EDI_REJECTED = "EDI_REJECTED", "999/TA1 rejected"
+    EDI_REJECTED = "EDI_REJECTED", "999/TA1 rejected — correction required"
 
     # Attachment / long-distance document flow.
     ATTACHMENT_REQUIRED = "ATTACHMENT_REQUIRED", "Attachment required"

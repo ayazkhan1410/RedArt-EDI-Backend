@@ -119,11 +119,18 @@ def allocate_control_numbers(
     isa13=None,
     gs06=None,
     environment=None,
+    force_new=False,
 ):
     """
-    Create (or return existing active) EDIControlNumber for a batch.
-    Allocates next ISA13/GS06 per environment when not provided.
-    Retries briefly on unique races between concurrent allocators.
+    Allocate an EDIControlNumber for a batch.
+
+    force_new=False (default / idempotent retry): return the existing active
+      control row for this batch when one exists.  Safe for retrying the same
+      physical upload without creating a duplicate interchange.
+
+    force_new=True (new physical file / regeneration): always create a fresh
+      ISA13/GS06 pair.  Required whenever a new X12 file is generated so that
+      no two different physical files share the same interchange control number.
     """
     batch = (
         SubmissionBatch.objects.select_for_update(of=("self",))
@@ -134,13 +141,14 @@ def allocate_control_numbers(
     if batch is None:
         raise ValueError("Batch not found or inactive.")
 
-    existing = (
-        EDIControlNumber.objects.select_for_update(of=("self",))
-        .filter(batch_id=batch.id, is_active=True)
-        .first()
-    )
-    if existing is not None:
-        return existing, False
+    if not force_new:
+        existing = (
+            EDIControlNumber.objects.select_for_update(of=("self",))
+            .filter(batch_id=batch.id, is_active=True)
+            .first()
+        )
+        if existing is not None:
+            return existing, False
 
     env = (environment or batch.environment or "TEST").strip().upper()
     last_error = None
@@ -305,7 +313,9 @@ def mark_edi_file_uploaded(edi_file_id, *, path_or_blob_ref=None, file_hash=None
         batch.status = BatchStatus.SUBMITTED
         batch.save(update_fields=["status", "updated_at"])
 
-    # Business claim status: EDI_GENERATED → EDI_SENT (= uploaded to HCPF).
+    # Business claim status: EDI_GENERATED → EDI_SENT.
+    # EDI_SENT means "written to HCPF SFTP/MFT" — not gateway pickup, not paid.
+    # HCPF pickup evidence requires a 999/TA1 (→ EDI_ACCEPTED or EDI_REJECTED).
     # Also accepts READY_FOR_837P / DOCUMENTS_COMPLETE for backward compat with
     # flows that did not pass through the EDI_GENERATED intermediate state.
     if edi_file.batch_id:

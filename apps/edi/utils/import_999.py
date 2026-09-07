@@ -14,11 +14,17 @@ import traceback
 from django.db import transaction
 from django.utils import timezone
 
-from apps.edi.choices import EDI999ImportStatus, SFTPDirectoryPurpose
+from apps.edi.choices import (
+    EDI999ImportStatus,
+    SFTPDirectoryPurpose,
+    ValidationReportStatus,
+    ValidationReportType,
+)
 from apps.edi.models import (
     EDI999Import,
     EDIControlNumber,
     EDIFile,
+    EDIValidationReport,
     SFTPDirectory,
 )
 from apps.edi.utils.import_errors import PermanentImportError
@@ -28,12 +34,20 @@ from apps.edi.utils.x12 import parse_999
 
 logger = logging.getLogger(__name__)
 
-# Filenames that are clearly not 999 payloads.
+# Files that are definitely not X12 payloads and not error/rejection reports.
 _SKIP_NAME_RE = re.compile(
-    r"\.(rsp|rjct|description|tmp|part|bak)$",
+    r"\.(tmp|part|bak)$",
     re.IGNORECASE,
 )
-_LOOKS_LIKE_999_NAME = re.compile(r"999|\.edi$|\.x12$|\.txt$", re.IGNORECASE)
+
+# Edifecs rejection/error report extensions — download and save, never silently skip.
+_REPORT_EXT_RE = re.compile(
+    r"\.(rsp|rjct|description|html?)$",
+    re.IGNORECASE,
+)
+
+# Filenames that look like a 999/TA1 X12 payload.
+_LOOKS_LIKE_999_NAME = re.compile(r"999|TA1|\.edi$|\.x12$|\.txt$", re.IGNORECASE)
 
 
 def _mark(row: EDI999Import, *, status, message=None, detail=None, finished=False):
@@ -113,7 +127,17 @@ def resolve_batch_for_999(parsed: dict):
 
     batch = control.batch if control else None
     edi_file = None
-    if batch is not None:
+    if control is not None:
+        # T8: match by the exact control number, not just "latest file in batch".
+        # A batch may have multiple physical files with different ISA13/GS06 values;
+        # attaching the ack to the wrong file corrupts the audit trail.
+        edi_file = (
+            EDIFile.objects.filter(control_number_id=control.id, is_active=True)
+            .order_by("-id")
+            .first()
+        )
+    if edi_file is None and batch is not None:
+        # Fallback for legacy records created before per-file control linking.
         edi_file = (
             EDIFile.objects.filter(batch_id=batch.id, is_active=True)
             .order_by("-id")
@@ -122,12 +146,114 @@ def resolve_batch_for_999(parsed: dict):
     return batch, edi_file
 
 
+def _is_report_file(name: str) -> bool:
+    """True for Edifecs .rjct / .rsp / .description / .html rejection/error reports."""
+    return bool(name and _REPORT_EXT_RE.search(name))
+
+
 def _candidate_filename(name: str) -> bool:
+    """True for filenames that may be 999/TA1 X12 payloads."""
     if not name or name.startswith("."):
         return False
     if _SKIP_NAME_RE.search(name):
         return False
     return bool(_LOOKS_LIKE_999_NAME.search(name))
+
+
+def save_rejection_report(
+    *,
+    credentials,
+    directory,
+    filename: str,
+    remote_path: str,
+    batch=None,
+    edi_file=None,
+) -> EDIValidationReport | None:
+    """
+    Download a .rjct / .rsp / .description / .html file from SFTP and save it
+    as an EDIValidationReport so it is never silently lost.
+
+    Returns the saved row or None if already imported (idempotent on hash).
+    """
+    try:
+        data = download_bytes_via_sftp(
+            credentials=credentials,
+            remote_path=remote_path,
+        )
+    except Exception as exc:
+        logger.exception(
+            "Failed to download rejection report %s: %s", remote_path, exc
+        )
+        return None
+
+    if not data:
+        logger.warning("Rejection report %s is empty; skipping.", remote_path)
+        return None
+
+    digest = hashlib.sha256(data).hexdigest()
+
+    # Idempotent — if we already saved this exact file, skip.
+    existing = EDIValidationReport.objects.filter(
+        file_hash=digest, is_active=True
+    ).first()
+    if existing:
+        logger.debug("Rejection report already saved (hash=%s); skipping.", digest)
+        return existing
+
+    # Detect report type from extension / filename.
+    name_lower = filename.lower()
+    if name_lower.endswith(".rjct"):
+        report_type = ValidationReportType.AUDIT
+        status = ValidationReportStatus.REJECTED
+    elif name_lower.endswith(".rsp"):
+        report_type = ValidationReportType.SUMMARY
+        status = ValidationReportStatus.UNKNOWN
+    elif name_lower.endswith(".description"):
+        report_type = ValidationReportType.SUMMARY
+        status = ValidationReportStatus.ERROR
+    else:
+        # .html or unknown — attempt parse; fall back to UNKNOWN.
+        report_type = ValidationReportType.AUDIT
+        status = ValidationReportStatus.UNKNOWN
+
+    # Try XML parse for richer metadata; if it fails, store raw text only.
+    parsed_summary: dict = {}
+    try:
+        from apps.edi.utils.edifecs_report import parse_edifecs_report
+
+        parsed = parse_edifecs_report(
+            data.decode("utf-8", errors="replace"), file_name=filename
+        )
+        report_type = parsed.get("report_type") or report_type
+        status = parsed.get("status") or status
+        parsed_summary = parsed.get("parsed_summary") or {}
+    except Exception:
+        pass  # Raw binary / non-XML — store as-is with minimal metadata.
+
+    try:
+        report = EDIValidationReport.objects.create(
+            batch=batch,
+            edi_file=edi_file,
+            report_type=report_type,
+            status=status,
+            file_name=filename,
+            file_hash=digest,
+            raw_file_ref=remote_path,
+            message=f"Edifecs response file: {filename}",
+            parsed_summary=parsed_summary or None,
+            is_active=True,
+        )
+        logger.info(
+            "Saved rejection/response report filename=%s type=%s status=%s hash=%s",
+            filename,
+            report_type,
+            status,
+            digest,
+        )
+        return report
+    except Exception as exc:
+        logger.exception("Could not save rejection report %s: %s", filename, exc)
+        return None
 
 
 def discover_edi_999_imports(*, credentials_id=None, batch_id=None):
@@ -172,6 +298,18 @@ def discover_edi_999_imports(*, credentials_id=None, batch_id=None):
         for entry in entries:
             filename = entry["filename"]
             remote_path = entry["remote_path"]
+
+            # Rejection / error report files (.rjct, .rsp, .description, .html):
+            # download and save as EDIValidationReport — never silently skip.
+            if _is_report_file(filename):
+                save_rejection_report(
+                    credentials=directory.credentials,
+                    directory=directory,
+                    filename=filename,
+                    remote_path=remote_path,
+                )
+                continue
+
             if not _candidate_filename(filename):
                 continue
 
