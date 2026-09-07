@@ -76,10 +76,11 @@ def filter_active_for_list(request, queryset):
     return queryset
 
 
-def client_error_message(exc, *, fallback: str = "Request failed.", max_length: int = 500) -> str:
+def client_error_message(exc, *, fallback: str = "Request failed.", max_length: int = 2000) -> str:
     """
     Safe client-facing message from an exception.
-    Keeps short ValueError/Validation text; strips traceback-like payloads.
+    Keeps ValueError/Validation text (including multi-line readiness lists);
+    strips traceback-like payloads.
     """
     text = str(getattr(exc, "detail", None) or exc or "").strip()
     if not text:
@@ -87,8 +88,12 @@ def client_error_message(exc, *, fallback: str = "Request failed.", max_length: 
     lowered = text.lower()
     if "traceback (most recent call last)" in lowered or "\n  file \"" in lowered:
         return fallback
-    # Prefer first line only (avoid accidental multi-line dumps).
-    text = text.splitlines()[0].strip()
+    # Multi-line business errors (e.g. 837P readiness) must stay intact.
+    # Only collapse unknown multi-line dumps that look like stack frames.
+    if "\n" in text and any(
+        line.lstrip().startswith(('File "', "File '")) for line in text.splitlines()
+    ):
+        text = text.splitlines()[0].strip()
     if len(text) > max_length:
         text = text[: max_length - 1].rstrip() + "…"
     return text or fallback
