@@ -706,3 +706,96 @@ class EDI999ImportAPITests(EDIFixturesMixin, AuthAPITestCase):
         # ISA must be exactly 106 chars
         isa_line = [seg for seg in body.split("\n") if seg.startswith("ISA*")][0]
         self.assertEqual(len(isa_line), 106, f"ISA length mismatch: {len(isa_line)}")
+
+
+class HcpfSftpPathSwapTests(TestCase):
+    """Ops path swap: send → Incoming/fromedifecs; poll ← Outgoing/toedifecs."""
+
+    def test_path_constants_swapped(self):
+        from apps.edi.utils.upload import HCPF_837P_SEND_PATH, HCPF_ACK_RECEIVE_PATH
+
+        self.assertEqual(
+            HCPF_837P_SEND_PATH,
+            "Organizational/Incoming/fromedifecs/edifecs.stco.hosted",
+        )
+        self.assertEqual(
+            HCPF_ACK_RECEIVE_PATH,
+            "Organizational/Outgoing/edifecs.stco.hosted/toedifecs",
+        )
+        self.assertNotEqual(HCPF_837P_SEND_PATH, HCPF_ACK_RECEIVE_PATH)
+
+    def test_sync_updates_stale_edifecs_directory_paths(self):
+        from apps.edi.models import SFTPCredentials, SFTPDirectory
+        from apps.edi.utils.upload import (
+            HCPF_837P_SEND_PATH,
+            HCPF_ACK_RECEIVE_PATH,
+            sync_hcpf_directory_paths,
+        )
+
+        partner = TradingPartner.objects.create(
+            name="HCPF Path Test",
+            sender_id="89513013",
+            receiver_id="COMEDASSISTPROG",
+            environment="PRODUCTION",
+            is_active=True,
+        )
+        cred = SFTPCredentials.objects.create(
+            name="HCPF-MFT-PATH-TEST",
+            trading_partner=partner,
+            environment="PRODUCTION",
+            host="sftp.mft.edifecsfedcloud.com",
+            port=22,
+            username="user",
+            auth_type="PASSWORD",
+            password="secret",
+            is_active=True,
+        )
+        directory = SFTPDirectory.objects.create(
+            credentials=cred,
+            name="stale outbound",
+            purpose="OUTBOUND_837P",
+            sending_path="Organizational/Outgoing/edifecs.stco.hosted/toedifecs",
+            receiving_path="Organizational/Incoming/fromedifecs/edifecs.stco.hosted",
+            is_active=True,
+        )
+        updated = sync_hcpf_directory_paths(credentials=cred)
+        self.assertEqual(updated, 1)
+        directory.refresh_from_db()
+        self.assertEqual(directory.sending_path, HCPF_837P_SEND_PATH)
+        self.assertEqual(directory.receiving_path, HCPF_ACK_RECEIVE_PATH)
+
+    def test_sync_skips_non_edifecs_hosts(self):
+        from apps.edi.models import SFTPCredentials, SFTPDirectory
+        from apps.edi.utils.upload import sync_hcpf_directory_paths
+
+        partner = TradingPartner.objects.create(
+            name="Local Path Test",
+            sender_id="TPLOCAL",
+            receiver_id="RECV",
+            environment="TEST",
+            is_active=True,
+        )
+        cred = SFTPCredentials.objects.create(
+            name="LOCAL-SFTP",
+            trading_partner=partner,
+            environment="TEST",
+            host="127.0.0.1",
+            port=22,
+            username="user",
+            auth_type="PASSWORD",
+            password="secret",
+            is_active=True,
+        )
+        directory = SFTPDirectory.objects.create(
+            credentials=cred,
+            name="local outbound",
+            purpose="OUTBOUND_837P",
+            sending_path="/send",
+            receiving_path="/recv",
+            is_active=True,
+        )
+        updated = sync_hcpf_directory_paths(credentials=cred)
+        self.assertEqual(updated, 0)
+        directory.refresh_from_db()
+        self.assertEqual(directory.sending_path, "/send")
+        self.assertEqual(directory.receiving_path, "/recv")

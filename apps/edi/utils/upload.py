@@ -25,6 +25,32 @@ from apps.edi.utils.service import mark_edi_file_uploaded
 
 logger = logging.getLogger(__name__)
 
+# HCPF Edifecs MFT drop / poll paths (ops-swapped 2026-09-07).
+# Previous send: "Outgoing/edifecs.stco.hosted/toedifecs"
+# Previous send: "Organizational/Outgoing/edifecs.stco.hosted/toedifecs"
+# Previous receive: "Organizational/Incoming/fromedifecs/edifecs.stco.hosted"
+HCPF_837P_SEND_PATH = "Organizational/Incoming/fromedifecs/edifecs.stco.hosted"
+HCPF_ACK_RECEIVE_PATH = "Organizational/Outgoing/edifecs.stco.hosted/toedifecs"
+
+
+def sync_hcpf_directory_paths(*, credentials) -> int:
+    """
+    Point every active directory for this Edifecs credential at the current
+    send/receive pair so uploads and 999 polls do not keep stale DB paths.
+    """
+    if credentials is None:
+        return 0
+    host = (getattr(credentials, "host", None) or "").lower()
+    if "edifecs" not in host:
+        return 0
+    return SFTPDirectory.objects.filter(
+        credentials_id=credentials.id,
+        is_active=True,
+    ).update(
+        sending_path=HCPF_837P_SEND_PATH,
+        receiving_path=HCPF_ACK_RECEIVE_PATH,
+    )
+
 
 def resolve_outbound_directory(*, trading_partner_id=None, credentials_id=None):
     qs = SFTPDirectory.objects.with_relations().filter(
@@ -48,6 +74,10 @@ def resolve_outbound_directory(*, trading_partner_id=None, credentials_id=None):
         if credentials_id:
             qs = qs.filter(credentials_id=credentials_id)
         directory = qs.order_by("-id").first()
+    if directory is not None:
+        sync_hcpf_directory_paths(credentials=directory.credentials)
+        directory.refresh_from_db()
+        return directory
     if directory is None:
         # Self-heal the production row from the active Render-managed Edifecs
         # credential. The credential is securely seeded at every web startup.
@@ -87,20 +117,20 @@ def resolve_outbound_directory(*, trading_partner_id=None, credentials_id=None):
             )
             return SimpleNamespace(
                 credentials=credential,
-                # Previous: "Outgoing/edifecs.stco.hosted/toedifecs"
-                sending_path="Organizational/Outgoing/edifecs.stco.hosted/toedifecs",
+                sending_path=HCPF_837P_SEND_PATH,
             )
         directory, _ = SFTPDirectory.objects.update_or_create(
             credentials=credential,
             purpose=SFTPDirectoryPurpose.OUTBOUND_837P,
             defaults={
                 "name": "HCPF 837P production send",
-                # Previous send: "Outgoing/edifecs.stco.hosted/toedifecs"
-                "sending_path": "Organizational/Outgoing/edifecs.stco.hosted/toedifecs",
-                "receiving_path": "Organizational/Incoming/fromedifecs/edifecs.stco.hosted",
+                "sending_path": HCPF_837P_SEND_PATH,
+                "receiving_path": HCPF_ACK_RECEIVE_PATH,
                 "is_active": True,
             },
         )
+        sync_hcpf_directory_paths(credentials=credential)
+        directory.refresh_from_db()
     return directory
 
 
