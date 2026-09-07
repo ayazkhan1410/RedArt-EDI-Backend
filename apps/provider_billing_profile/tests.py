@@ -75,3 +75,35 @@ class ProviderBillingProfileAPITests(AuthAPITestCase):
         response = self.client.get(url, {"search": "1111111111"})
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data["count"], 1)
+
+    def test_taxonomy_10_char_accepted(self):
+        url = reverse("provider-billing-profile-list-create")
+        response = self.client.post(
+            url,
+            {
+                "legal_name": "Taxonomy OK",
+                "npi": "1750058525",
+                "taxonomy_code": "343900000X",
+                "tax_id": "12-3456789",
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        profile = ProviderBillingProfile.objects.get(pk=response.data["data"]["id"])
+        self.assertEqual(profile.taxonomy_code, "343900000X")
+        self.assertEqual(profile.tax_id, "123456789")
+
+    def test_tax_id_placeholder_rejected(self):
+        url = reverse("provider-billing-profile-list-create")
+        response = self.client.post(
+            url,
+            {
+                "legal_name": "Bad Tax",
+                "npi": "1750058525",
+                "taxonomy_code": "343900000X",
+                "tax_id": "ASK_CLIENT_9_DIGIT_EIN",
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("tax_id", response.data.get("errors", response.data))
