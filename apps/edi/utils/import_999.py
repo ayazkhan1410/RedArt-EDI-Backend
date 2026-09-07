@@ -79,6 +79,8 @@ def _mark(row: EDI999Import, *, status, message=None, detail=None, finished=Fals
 
 def resolve_inbound_999_directories(*, credentials_id=None):
     """Active dirs used for inbound 999 pulls."""
+    from apps.edi.utils.upload import sync_hcpf_directory_paths
+
     qs = SFTPDirectory.objects.with_relations().filter(
         is_active=True,
         credentials__is_active=True,
@@ -89,7 +91,17 @@ def resolve_inbound_999_directories(*, credentials_id=None):
     )
     if credentials_id:
         qs = qs.filter(credentials_id=credentials_id)
-    return list(qs.order_by("-id"))
+    directories = list(qs.order_by("-id"))
+    # Keep Edifecs poll path current (ops may rotate Incoming/Outgoing roles).
+    seen = set()
+    for directory in directories:
+        cred_id = directory.credentials_id
+        if cred_id and cred_id not in seen:
+            sync_hcpf_directory_paths(credentials=directory.credentials)
+            seen.add(cred_id)
+    if seen:
+        directories = list(qs.order_by("-id"))
+    return directories
 
 
 def resolve_batch_for_999(parsed: dict):
