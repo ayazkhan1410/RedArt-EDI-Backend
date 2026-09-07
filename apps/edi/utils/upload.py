@@ -87,14 +87,16 @@ def resolve_outbound_directory(*, trading_partner_id=None, credentials_id=None):
             )
             return SimpleNamespace(
                 credentials=credential,
-                sending_path="Outgoing/edifecs.stco.hosted/toedifecs",
+                # Previous: "Outgoing/edifecs.stco.hosted/toedifecs"
+                sending_path="Organizational/Outgoing/edifecs.stco.hosted/toedifecs",
             )
         directory, _ = SFTPDirectory.objects.update_or_create(
             credentials=credential,
             purpose=SFTPDirectoryPurpose.OUTBOUND_837P,
             defaults={
                 "name": "HCPF 837P production send",
-                "sending_path": "Outgoing/edifecs.stco.hosted/toedifecs",
+                # Previous send: "Outgoing/edifecs.stco.hosted/toedifecs"
+                "sending_path": "Organizational/Outgoing/edifecs.stco.hosted/toedifecs",
                 "receiving_path": "Organizational/Incoming/fromedifecs/edifecs.stco.hosted",
                 "is_active": True,
             },
