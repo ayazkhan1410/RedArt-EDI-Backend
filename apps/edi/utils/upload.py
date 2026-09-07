@@ -25,18 +25,26 @@ from apps.edi.utils.service import mark_edi_file_uploaded
 
 logger = logging.getLogger(__name__)
 
-# HCPF Edifecs MFT drop / poll paths (ops-swapped 2026-09-07).
-# Previous send: "Outgoing/edifecs.stco.hosted/toedifecs"
-# Previous send: "Organizational/Outgoing/edifecs.stco.hosted/toedifecs"
-# Previous receive: "Organizational/Incoming/fromedifecs/edifecs.stco.hosted"
+# HCPF Edifecs MFT paths — confirmed via ops on 2026-09-07.
+#
+# Edifecs MFT places 999/TA1 acks in the SAME folder we drop 837P files into
+# (Organizational/Incoming/fromedifecs/…).  Both send and receive therefore
+# share one folder.  Previous guesses are kept below for rollback reference.
+#
+# Previous guesses (all wrong):
+#   "Outgoing/edifecs.stco.hosted/toedifecs"
+#   "Organizational/Outgoing/edifecs.stco.hosted/toedifecs"
+#   "Organizational/Incoming/fromedifecs/edifecs.stco.hosted"  ← SEND only
 HCPF_837P_SEND_PATH = "Organizational/Incoming/fromedifecs/edifecs.stco.hosted"
-HCPF_ACK_RECEIVE_PATH = "Organizational/Outgoing/edifecs.stco.hosted/toedifecs"
+# 999/TA1 acks land in the SAME folder as outbound 837P.
+HCPF_ACK_RECEIVE_PATH = HCPF_837P_SEND_PATH
 
 
 def sync_hcpf_directory_paths(*, credentials) -> int:
     """
-    Point every active directory for this Edifecs credential at the current
-    send/receive pair so uploads and 999 polls do not keep stale DB paths.
+    Point every active Edifecs directory to the confirmed send/receive path.
+    Both outbound (837P) and inbound (999/277/835) share the same MFT folder.
+    Safe to call on every upload or poll — uses update() for atomicity.
     """
     if credentials is None:
         return 0
