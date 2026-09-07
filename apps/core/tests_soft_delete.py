@@ -21,6 +21,14 @@ class ClientErrorMessageTests(SimpleTestCase):
             "Batch has no claims.",
         )
 
+    def test_keeps_multiline_readiness_errors(self):
+        msg = (
+            "Batch WALLA-BATCH-001 is not ready for 837P generation (2 error(s)):\n"
+            "  • Claim 2: provider 2 is missing tax_id (EIN/TIN).\n"
+            "  • Claim 2: service line 1 is missing procedure_code."
+        )
+        self.assertEqual(client_error_message(ValueError(msg)), msg)
+
     def test_strips_traceback_payload(self):
         payload = (
             "Traceback (most recent call last):\n"

@@ -24,10 +24,12 @@ from apps.core.soft_delete import (
     parse_hard_flag,
 )
 
+from apps.claim.models import SubmissionBatch
 from apps.claim.utils.validators import parse_optional_int
 from apps.core.pagination import StandardPagination
 from apps.core.utils.responses import error_response, success_response
 from apps.edi.models import EDIControlNumber, EDIFile, EDIFileTransferLog
+from apps.edi.utils.readiness import collect_batch_readiness_errors
 from apps.edi.serializers import (
     AllocateControlNumberSerializer,
     CreateEDIFileFromBatchSerializer,
@@ -730,7 +732,19 @@ class EDIFileGenerate837PAPIView(APIView):
                 status_code=status.HTTP_201_CREATED,
             )
         except ValueError as exc:
-            return error_response(client_error_message(exc), status_code=status.HTTP_400_BAD_REQUEST)
+            # Readiness raises a multi-line ValueError; also return a list so
+            # clients (Swagger/curl) see every fix item, not only the summary line.
+            batch_id = (getattr(request, "data", None) or {}).get("batch_id")
+            detail_errors = None
+            if batch_id is not None:
+                batch = SubmissionBatch.objects.filter(pk=batch_id, is_active=True).first()
+                if batch is not None:
+                    detail_errors = collect_batch_readiness_errors(batch) or None
+            return error_response(
+                client_error_message(exc),
+                errors=detail_errors,
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
         except IntegrityError:
             return error_response(
                 "Unable to generate 837P due to a conflict.",
