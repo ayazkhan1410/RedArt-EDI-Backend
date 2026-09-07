@@ -27,7 +27,19 @@ class ClientErrorMessageTests(SimpleTestCase):
             "  • Claim 2: provider 2 is missing tax_id (EIN/TIN).\n"
             "  • Claim 2: service line 1 is missing procedure_code."
         )
-        self.assertEqual(client_error_message(ValueError(msg)), msg)
+        # Full multi-line text must survive — never truncated to first line.
+        result = client_error_message(ValueError(msg))
+        self.assertEqual(result, msg)
+
+    def test_error_response_auto_extracts_bullets(self):
+        from apps.core.utils.responses import error_response
+        msg = (
+            "Batch not ready (2 error(s)):\n"
+            "  • Missing tax_id.\n"
+            "  • Missing procedure_code."
+        )
+        resp = error_response(msg)
+        self.assertEqual(resp.data["errors"], ["Missing tax_id.", "Missing procedure_code."])
 
     def test_strips_traceback_payload(self):
         payload = (

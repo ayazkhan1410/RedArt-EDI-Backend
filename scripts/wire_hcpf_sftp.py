@@ -23,7 +23,10 @@ KEY_PATH = Path(
 HOST = "sftp.mft.edifecsfedcloud.com"
 USERNAME = "mft_task_01fce47a-0498-4fb4-wt4m"
 HOST_FINGERPRINT = "SHA256:xhCbKNBog9ztBEubwfUfb1ODz8e/azOlVeaVb77ug8Q"
-SEND_PATH = "Outgoing/edifecs.stco.hosted/toedifecs"
+# Previous send path (root Outgoing) — keep for rollback if Edifecs still uses it:
+# SEND_PATH = "Outgoing/edifecs.stco.hosted/toedifecs"
+# HCPF MFT: send under Organizational/Outgoing; receive under Organizational/Incoming.
+SEND_PATH = "Organizational/Outgoing/edifecs.stco.hosted/toedifecs"
 RECEIVE_PATH = "Organizational/Incoming/fromedifecs/edifecs.stco.hosted"
 
 
