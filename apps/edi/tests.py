@@ -470,6 +470,26 @@ class EDIAcknowledgementAPITests(EDIFixturesMixin, AuthAPITestCase):
         self.assertNotIn("NM1*DN*", body)
 
 
+class T2RejectionFileTests(TestCase):
+    """T2: .rjct/.rsp/.description/.html files must not be silently skipped."""
+
+    def test_is_report_file_detects_rjct_rsp_description_html(self):
+        from apps.edi.utils.import_999 import _is_report_file
+        for name in ["file.rjct", "file.rsp", "file.description", "report.html", "rpt.htm"]:
+            self.assertTrue(_is_report_file(name), f"Should detect: {name}")
+
+    def test_is_report_file_ignores_x12_and_txt(self):
+        from apps.edi.utils.import_999 import _is_report_file
+        for name in ["999.x12", "ack.txt", "data.edi", "file.tmp"]:
+            self.assertFalse(_is_report_file(name), f"Should not detect: {name}")
+
+    def test_candidate_filename_accepts_999_x12(self):
+        from apps.edi.utils.import_999 import _candidate_filename
+        self.assertTrue(_candidate_filename("tp123-999-20260901120000000-1of1.x12"))
+        self.assertFalse(_candidate_filename("tp123.rjct"))   # routed to save_rejection, not 999
+        self.assertFalse(_candidate_filename("file.tmp"))
+
+
 class EDI999ImportAPITests(EDIFixturesMixin, AuthAPITestCase):
     def test_poll_import_999_async_returns_celery_task(self):
         from unittest.mock import patch

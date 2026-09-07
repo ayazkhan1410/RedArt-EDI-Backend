@@ -365,15 +365,24 @@ def run_edi_file_upload(*, edi_file_id, attempt, task_id=None, credentials_id=No
         )
         try:
             key = f"edi/837p/{edi_file.batch_id or 'unknown'}/{filename}"
+            # T10: upload_bytes_to_s3 is non-fatal; returns None when S3 unavailable.
             s3_uri = upload_bytes_to_s3(key=key, data=data)
-            _mark_log(
-                s3_log,
-                status=TransferLogStatus.SUCCESS,
-                message="Uploaded to MinIO/S3 successfully.",
-                remote_path=s3_uri,
-                task_id=task_id,
-            )
-            s3_ok = True
+            if s3_uri:
+                _mark_log(
+                    s3_log,
+                    status=TransferLogStatus.SUCCESS,
+                    message="Uploaded to S3 audit archive.",
+                    remote_path=s3_uri,
+                    task_id=task_id,
+                )
+                s3_ok = True
+            else:
+                _mark_log(
+                    s3_log,
+                    status=TransferLogStatus.FAILED,
+                    message="S3 bucket not configured or unreachable. Set AWS_* env vars.",
+                    task_id=task_id,
+                )
         except Exception as exc:
             _mark_log(
                 s3_log,
@@ -382,7 +391,7 @@ def run_edi_file_upload(*, edi_file_id, attempt, task_id=None, credentials_id=No
                 detail=str(exc)[:2000],
                 task_id=task_id,
             )
-            logger.exception("S3 upload failed edi_file_id=%s", edi_file_id)
+            logger.warning("S3 audit upload failed (non-fatal) edi_file_id=%s: %s", edi_file_id, exc)
 
     if sftp_ok:
         # SFTP delivery is the authoritative payer submission. S3 is optional

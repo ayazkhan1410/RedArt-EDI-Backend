@@ -127,7 +127,17 @@ def resolve_batch_for_999(parsed: dict):
 
     batch = control.batch if control else None
     edi_file = None
-    if batch is not None:
+    if control is not None:
+        # T8: match by the exact control number, not just "latest file in batch".
+        # A batch may have multiple physical files with different ISA13/GS06 values;
+        # attaching the ack to the wrong file corrupts the audit trail.
+        edi_file = (
+            EDIFile.objects.filter(control_number_id=control.id, is_active=True)
+            .order_by("-id")
+            .first()
+        )
+    if edi_file is None and batch is not None:
+        # Fallback for legacy records created before per-file control linking.
         edi_file = (
             EDIFile.objects.filter(batch_id=batch.id, is_active=True)
             .order_by("-id")

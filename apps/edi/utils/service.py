@@ -119,11 +119,18 @@ def allocate_control_numbers(
     isa13=None,
     gs06=None,
     environment=None,
+    force_new=False,
 ):
     """
-    Create (or return existing active) EDIControlNumber for a batch.
-    Allocates next ISA13/GS06 per environment when not provided.
-    Retries briefly on unique races between concurrent allocators.
+    Allocate an EDIControlNumber for a batch.
+
+    force_new=False (default / idempotent retry): return the existing active
+      control row for this batch when one exists.  Safe for retrying the same
+      physical upload without creating a duplicate interchange.
+
+    force_new=True (new physical file / regeneration): always create a fresh
+      ISA13/GS06 pair.  Required whenever a new X12 file is generated so that
+      no two different physical files share the same interchange control number.
     """
     batch = (
         SubmissionBatch.objects.select_for_update(of=("self",))
@@ -134,13 +141,14 @@ def allocate_control_numbers(
     if batch is None:
         raise ValueError("Batch not found or inactive.")
 
-    existing = (
-        EDIControlNumber.objects.select_for_update(of=("self",))
-        .filter(batch_id=batch.id, is_active=True)
-        .first()
-    )
-    if existing is not None:
-        return existing, False
+    if not force_new:
+        existing = (
+            EDIControlNumber.objects.select_for_update(of=("self",))
+            .filter(batch_id=batch.id, is_active=True)
+            .first()
+        )
+        if existing is not None:
+            return existing, False
 
     env = (environment or batch.environment or "TEST").strip().upper()
     last_error = None

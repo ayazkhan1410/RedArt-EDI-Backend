@@ -820,17 +820,71 @@ class TestMultiClaimBatch(EnterpriseFixturesMixin, TestCase):
 
 class TestIdempotency(EnterpriseFixturesMixin, TestCase):
 
-    def test_control_number_allocation_idempotent(self):
-        """Re-allocating control numbers for the same batch returns existing row."""
+    def test_control_number_allocation_idempotent_default(self):
+        """force_new=False (default): re-allocating returns the existing row."""
         ctrl1, created1 = allocate_control_numbers(batch_id=self.batch.id)
         ctrl2, created2 = allocate_control_numbers(batch_id=self.batch.id)
         self.assertTrue(created1)
         self.assertFalse(created2)
         self.assertEqual(ctrl1.id, ctrl2.id)
 
+    def test_t6_force_new_allocates_unique_isa13_per_generate(self):
+        """T6: force_new=True always produces a distinct ISA13/GS06."""
+        ctrl1, _ = allocate_control_numbers(batch_id=self.batch.id, force_new=True)
+        ctrl2, _ = allocate_control_numbers(batch_id=self.batch.id, force_new=True)
+        self.assertNotEqual(ctrl1.id, ctrl2.id)
+        self.assertNotEqual(ctrl1.isa13, ctrl2.isa13)
+        self.assertNotEqual(ctrl1.gs06, ctrl2.gs06)
+
+    def test_t7_filename_matches_hcpf_pattern(self):
+        """T7: generated filename must follow tp{TPID}-837P-{17digits}-1of1.x12."""
+        import re
+        from apps.edi.utils.service import build_colorado_837p_filename
+        fname = build_colorado_837p_filename(sender_id="89513013")
+        pattern = re.compile(r"^tp\d+-837P-\d{17}-1of1\.x12$", re.IGNORECASE)
+        self.assertTrue(pattern.match(fname), f"Bad filename: {fname}")
+
+    def test_t7_filename_missing_tp_prefix_raises(self):
+        """T7: empty sender_id must raise rather than produce a bad filename."""
+        from apps.edi.utils.service import build_colorado_837p_filename
+        with self.assertRaises(ValueError):
+            build_colorado_837p_filename(sender_id="")
+
+    def test_t8_999_resolves_to_edi_file_by_control_number(self):
+        """T8: 999 match via control number → specific EDIFile, not latest."""
+        from apps.edi.utils.import_999 import resolve_batch_for_999
+        from apps.edi.utils.service import create_edi_file_for_batch
+        # Create two EDI files on the same batch with different control numbers.
+        ctrl1, _ = allocate_control_numbers(batch_id=self.batch.id, force_new=True)
+        file1 = create_edi_file_for_batch(
+            batch_id=self.batch.id, file_hash="HASH-T8-A", allocate_controls=False
+        )
+        file1.control_number = ctrl1
+        file1.save(update_fields=["control_number", "updated_at"])
+
+        ctrl2, _ = allocate_control_numbers(batch_id=self.batch.id, force_new=True)
+        file2 = create_edi_file_for_batch(
+            batch_id=self.batch.id, file_hash="HASH-T8-B", allocate_controls=False
+        )
+        file2.control_number = ctrl2
+        file2.save(update_fields=["control_number", "updated_at"])
+
+        # Simulate a 999 that references ctrl1's ISA13/GS06.
+        parsed = {"isa13": ctrl1.isa13, "gs06": ctrl1.gs06}
+        batch, resolved_file = resolve_batch_for_999(parsed)
+        self.assertIsNotNone(resolved_file)
+        self.assertEqual(resolved_file.id, file1.id, "Must match file1, not latest file2")
+
+    def test_t10_s3_upload_non_fatal_on_missing_bucket(self):
+        """T10: S3 failure must return None, never raise."""
+        from unittest.mock import patch
+        from apps.edi.utils.s3_client import upload_bytes_to_s3
+        with patch("apps.edi.utils.s3_client.ensure_bucket", return_value=None):
+            result = upload_bytes_to_s3(key="test/key", data=b"x")
+        self.assertIsNone(result)
+
     def test_duplicate_batch_claim_prevented_by_constraint(self):
         """The same claim cannot be added to the same batch twice."""
-        from django.db import IntegrityError
         with self.assertRaises(Exception):  # UniqueConstraint → IntegrityError
             BatchClaim.objects.create(
                 batch=self.batch, claim=self.claim, st02="9999"
