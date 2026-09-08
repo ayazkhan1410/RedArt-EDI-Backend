@@ -10,8 +10,11 @@ Important rules:
   - Colorado Medicaid atypical provider ID is payer-assigned secondary ID
     REF*G2 in 2010BB, after NM1*PR.
   - 2010BA NM108=MI / NM109=Colorado Medicaid member ID.
+  - Subscriber DMG is emitted only when verified DOB and gender are both present.
   - ISA is exactly 106 characters including terminator.
 """
+
+from datetime import date, datetime
 
 from apps.edi.utils.envelope import DEFAULT_ENVELOPE
 from apps.edi.utils.required_claim_data import billing_address_errors, subscriber_errors
@@ -56,6 +59,19 @@ def _assert_isa_length(segment: str) -> None:
 
 def _tax_id_digits(provider: dict) -> str:
     return "".join(ch for ch in str(provider.get("tax_id") or "") if ch.isdigit())
+
+
+def _x12_dob(value) -> str:
+    if not value:
+        return ""
+    if isinstance(value, datetime):
+        value = value.date()
+    if isinstance(value, date):
+        return value.strftime("%Y%m%d")
+    text = str(value).strip()
+    if len(text) == 10 and text[4] == "-" and text[7] == "-":
+        return text.replace("-", "")
+    return text
 
 
 def build_edi_content(payload: dict) -> list[str]:
@@ -121,9 +137,11 @@ def build_edi_content(payload: dict) -> list[str]:
         st02 = claim["st02"]
         provider = claim["provider"]
         patient = claim["patient"]
-        errors = billing_address_errors(provider) + subscriber_errors(
-            patient.get("date_of_birth"), patient.get("gender")
-        )
+        errors = billing_address_errors(provider)
+        dob = _x12_dob(patient.get("date_of_birth"))
+        gender = str(patient.get("gender") or "").strip().upper()
+        if dob and gender:
+            errors += subscriber_errors(dob, gender)
         if errors:
             raise ValueError("; ".join(errors))
         st_start = len(edi_content)
@@ -276,9 +294,9 @@ def build_edi_content(payload: dict) -> list[str]:
             if city or state or zip_code:
                 edi_content.append(_seg(envelope, "N4", city, state, zip_code))
 
-        dob = (patient.get("date_of_birth") or "").strip()
-        gender = (patient.get("gender") or "").strip().upper()
-        edi_content.append(_seg(envelope, "DMG", "D8", dob, gender))
+        # Never fabricate demographics. Emit DMG only when both verified values exist.
+        if dob and gender:
+            edi_content.append(_seg(envelope, "DMG", "D8", dob, gender))
 
         edi_content.append(
             _seg(
