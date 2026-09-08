@@ -9,8 +9,8 @@ Rules (Colorado Medicaid NEMT):
     - NEVER default/fabricate a missing procedure code
 
   Patient (subscriber):
-    - medicaid_member_id is the ONLY mandatory identifier (NM1*IL MI)
-    - DOB, gender, address are OPTIONAL — emitted when present, never fabricated
+    - medicaid_member_id, verified DOB and recorded gender are required
+    - DMG is required for the generated self-subscriber (SBR02=18) flow
 
   Provider (billing):
     Both atypical and NPI providers:
@@ -43,6 +43,7 @@ from apps.claim.models import BatchClaim, SubmissionBatch
 from apps.claim.utils.service import assert_claim_ready_for_batch
 from apps.claim_service_line.models import ClaimServiceLine
 from apps.edi.utils.envelope import get_edi_envelope_config
+from apps.edi.utils.required_claim_data import billing_address_errors, subscriber_errors
 
 
 # ---------------------------------------------------------------------------
@@ -74,12 +75,12 @@ def _validate_envelope(batch) -> list[str]:
 
 def _validate_patient(patient, claim_label: str) -> list[str]:
     """
-    For Colorado NEMT 837P, medicaid_member_id is the ONLY mandatory field.
-
-    DOB / gender / address are optional — the generator emits them when present.
-    Never fabricate any missing demographic.
+    Require the demographics used by the self-subscriber DMG segment.
     """
     errors = []
+    errors.extend(f"{claim_label}: {error}" for error in subscriber_errors(
+        patient.date_of_birth, patient.gender
+    ))
     medicaid_id = (patient.medicaid_member_id or "").strip()
     if not medicaid_id:
         errors.append(
@@ -99,30 +100,11 @@ def _validate_provider(provider, claim_label: str) -> list[str]:
     errors = []
     is_atypical = bool(getattr(provider, "is_atypical", False))
     pid = provider.id
-
-    # 2010AA N3/N4 — required for every billing provider (HCPF rejects blank N4-03).
-    if not (provider.address_line_1 or "").strip():
-        errors.append(
-            f"{claim_label}: provider {pid} is missing address_line_1 "
-            "(required for 837P N3 billing address)."
-        )
-    if not (provider.city or "").strip():
-        errors.append(
-            f"{claim_label}: provider {pid} is missing city "
-            "(required for 837P N4-01)."
-        )
-    if not (provider.state or "").strip():
-        errors.append(
-            f"{claim_label}: provider {pid} is missing state "
-            "(required for 837P N4-02)."
-        )
-    zip_digits = "".join(ch for ch in str(provider.zip or "") if ch.isdigit())
-    if len(zip_digits) < 5:
-        errors.append(
-            f"{claim_label}: provider {pid} is missing zip "
-            "(N4-03 postal code required — empty zip is rejected by HCPF 999 IK4*I9). "
-            "PATCH the provider with a 5- or 9-digit zip before generate/upload."
-        )
+    # 2010AA N3/N4 — required (HCPF rejects blank N4-03 with IK4*I9).
+    errors.extend(f"{claim_label}: {error}" for error in billing_address_errors({
+        field: getattr(provider, field, None)
+        for field in ("address_line_1", "city", "state", "zip")
+    }))
 
     if is_atypical:
         medicaid_pid = (getattr(provider, "medicaid_provider_id", None) or "").strip()
