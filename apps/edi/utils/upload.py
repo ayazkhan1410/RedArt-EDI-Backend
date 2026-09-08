@@ -26,16 +26,20 @@ from apps.edi.utils.pyx12_preflight import assert_pyx12_valid
 
 logger = logging.getLogger(__name__)
 
-# HCPF MFT guide and live directory listing: outbound claims go to ToEdifecs;
-# received acknowledgments are retrieved from FromEdifecs.
-HCPF_837P_SEND_PATH = "Organizational/Outgoing/edifecs.stco.hosted/toedifecs"
-HCPF_ACK_RECEIVE_PATH = "Organizational/Incoming/fromedifecs/edifecs.stco.hosted"
+# HCPF Edifecs MFT paths — confirmed live 2026-09-07.
+# 837P drop AND 999/TA1 acks both use Incoming/fromedifecs (same folder).
+# Client main had guide-style Outgoing/Incoming split; live MFT put acks with sends.
+# Previous guesses kept for rollback:
+#   "Organizational/Outgoing/edifecs.stco.hosted/toedifecs"
+#   "Outgoing/edifecs.stco.hosted/toedifecs"
+HCPF_837P_SEND_PATH = "Organizational/Incoming/fromedifecs/edifecs.stco.hosted"
+HCPF_ACK_RECEIVE_PATH = HCPF_837P_SEND_PATH
 
 
 def sync_hcpf_directory_paths(*, credentials) -> int:
     """
     Point every active Edifecs directory to the confirmed send/receive path.
-    Keep outbound claims separate from incoming acknowledgments.
+    Both outbound (837P) and inbound (999) share the same MFT folder.
     Safe to call on every upload or poll — uses update() for atomicity.
     """
     if credentials is None:

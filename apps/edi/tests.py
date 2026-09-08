@@ -732,16 +732,17 @@ class ReceiverUploadGuardTests(TestCase):
 
 class HcpfSftpPathSwapTests(TestCase):
     """
-    Outgoing claims and incoming acknowledgments use separate MFT folders.
+    Confirmed 2026-09-07: Edifecs MFT drops 999 acks in the SAME folder
+    we send 837P to (Organizational/Incoming/fromedifecs/…).
     """
 
     def test_path_constants_confirmed(self):
         from apps.edi.utils.upload import HCPF_837P_SEND_PATH, HCPF_ACK_RECEIVE_PATH
 
         confirmed = "Organizational/Incoming/fromedifecs/edifecs.stco.hosted"
-        self.assertEqual(HCPF_837P_SEND_PATH, "Organizational/Outgoing/edifecs.stco.hosted/toedifecs")
+        self.assertEqual(HCPF_837P_SEND_PATH, confirmed)
         self.assertEqual(HCPF_ACK_RECEIVE_PATH, confirmed)
-        self.assertNotEqual(HCPF_837P_SEND_PATH, HCPF_ACK_RECEIVE_PATH)
+        self.assertEqual(HCPF_837P_SEND_PATH, HCPF_ACK_RECEIVE_PATH)
 
     def test_sync_updates_stale_edifecs_directory_paths(self):
         from apps.edi.models import SFTPCredentials, SFTPDirectory
@@ -773,8 +774,8 @@ class HcpfSftpPathSwapTests(TestCase):
             credentials=cred,
             name="stale outbound",
             purpose="OUTBOUND_837P",
-            sending_path="Organizational/Incoming/fromedifecs/edifecs.stco.hosted",
-            receiving_path="Organizational/Incoming/fromedifecs/edifecs.stco.hosted",
+            sending_path="Organizational/Outgoing/edifecs.stco.hosted/toedifecs",
+            receiving_path="Organizational/Outgoing/edifecs.stco.hosted/toedifecs",
             is_active=True,
         )
         updated = sync_hcpf_directory_paths(credentials=cred)
