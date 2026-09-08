@@ -1,7 +1,8 @@
-"""Required data for the self-subscriber Colorado 837P flow.
+"""Required-data checks for Colorado 837P generation.
 
-Edifecs rejects a missing 2010BA DMG when SBR02 is 18, even when
-the generic pyx12 map allows that situational segment to be absent.
+Never fabricate subscriber demographics. DOB/gender are optional here; when
+verified demographics are present they may be emitted as DMG, otherwise DMG is
+omitted.
 """
 
 from datetime import date, datetime
@@ -9,20 +10,26 @@ import re
 
 
 def subscriber_errors(dob, gender):
+    """Validate subscriber demographics only when they are actually supplied."""
     errors = []
-    if not dob:
-        errors.append("Subscriber date_of_birth is required for 2010BA DMG02 (SBR02=18).")
-    else:
+    if dob:
         try:
-            if not isinstance(dob, date) and not re.fullmatch(r"[0-9]{8}", str(dob)):
-                raise ValueError()
-            value = dob if isinstance(dob, date) else datetime.strptime(str(dob), "%Y%m%d").date()
+            if isinstance(dob, datetime):
+                value = dob.date()
+            elif isinstance(dob, date):
+                value = dob
+            else:
+                text = str(dob).strip()
+                if re.fullmatch(r"[0-9]{8}", text):
+                    value = datetime.strptime(text, "%Y%m%d").date()
+                else:
+                    value = date.fromisoformat(text)
             if value > date.today():
                 raise ValueError()
         except (ValueError, TypeError):
-            errors.append("Subscriber date_of_birth must be a valid, non-future date.")
-    if (gender or "").strip().upper() not in {"M", "F", "U"}:
-        errors.append("Subscriber gender is required for DMG03: M, F, or explicitly recorded U (unknown).")
+            errors.append("Subscriber date_of_birth, when supplied, must be a valid, non-future date.")
+    if gender and str(gender).strip().upper() not in {"M", "F", "U"}:
+        errors.append("Subscriber gender, when supplied, must be M, F, or U.")
     return errors
 
 
@@ -38,23 +45,19 @@ def billing_address_errors(provider):
 
 
 def x12_required_data_errors(raw):
-    """Apply the receiver's situational checks to the exact bytes to send."""
+    """Apply RedArt safety checks to the exact bytes to send."""
     text = (raw or "").lstrip("\ufeff\r\n\t ")
     if not text.startswith("ISA") or len(text) < 106:
         return []  # pyx12 reports malformed envelopes.
     separator, terminator = text[3], text[105]
     errors = []
     loop = None
-    self_subscriber = False
-    has_dmg = False
     has_billing_n4 = False
     for segment in text.split(terminator):
         fields = segment.strip().split(separator)
         tag = fields[0]
         value = lambda index: fields[index] if len(fields) > index else ""
         if tag == "ST":
-            self_subscriber = False
-            has_dmg = False
             has_billing_n4 = False
             loop = None
         if tag == "NM1":
@@ -65,11 +68,6 @@ def x12_required_data_errors(raw):
             has_billing_n4 = True
             if not value(3).strip():
                 errors.append("Billing provider zip is missing in 2010AA N403.")
-        if tag == "SBR":
-            self_subscriber = self_subscriber or value(2) == "18"
         if tag == "DMG" and loop == "IL":
-            has_dmg = True
             errors.extend(subscriber_errors(value(2), value(3)))
-        if tag == "SE" and self_subscriber and not has_dmg:
-            errors.append("2010BA DMG is required when 2000B SBR02=18; supply verified subscriber demographics.")
     return errors
