@@ -53,13 +53,37 @@ def x12_required_data_errors(raw):
     errors = []
     loop = None
     has_billing_n4 = False
+    awaiting_subscriber_sbr = False
+
     for segment in text.split(terminator):
         fields = segment.strip().split(separator)
         tag = fields[0]
+        if not tag:
+            continue
         value = lambda index: fields[index] if len(fields) > index else ""
+
+        # X222A1 subscriber loop 2000B: the subscriber HL (HL03=22) must be
+        # immediately followed by SBR. This catches the exact class of state
+        # 999 rejection reported as IK3 SBR / loop 2000 / I6 before SFTP.
+        if awaiting_subscriber_sbr:
+            if tag != "SBR":
+                errors.append(
+                    "2000B subscriber SBR is missing immediately after HL03=22."
+                )
+            else:
+                if value(1).strip() != "P":
+                    errors.append("2000B SBR01 must be P for this primary Medicaid claim flow.")
+                if value(2).strip() != "18":
+                    errors.append("2000B SBR02 must be 18 for this self-subscriber claim flow.")
+                if value(9).strip() != "MC":
+                    errors.append("2000B SBR09 must be MC for this Medicaid claim flow.")
+            awaiting_subscriber_sbr = False
+
         if tag == "ST":
             has_billing_n4 = False
             loop = None
+        if tag == "HL" and value(3).strip() == "22":
+            awaiting_subscriber_sbr = True
         if tag == "NM1":
             if loop == "85" and not has_billing_n4:
                 errors.append("Billing provider 2010AA N4 is missing.")
@@ -70,4 +94,7 @@ def x12_required_data_errors(raw):
                 errors.append("Billing provider zip is missing in 2010AA N403.")
         if tag == "DMG" and loop == "IL":
             errors.extend(subscriber_errors(value(2), value(3)))
+
+    if awaiting_subscriber_sbr:
+        errors.append("2000B subscriber SBR is missing after HL03=22.")
     return errors
